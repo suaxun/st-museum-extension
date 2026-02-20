@@ -1,5 +1,6 @@
-// 扩展名称
+// 扩展名称和常量
 const EXTENSION_NAME = "museum_importer";
+const EXTENSION_ID = "museum-extension-root"; // 唯一的 DOM ID
 
 // 全局变量
 let supabase = null;
@@ -8,38 +9,41 @@ let currentFilter = 'all';
 
 // --- 核心工具函数 ---
 
-// 安全地获取 SillyTavern 的 extension_settings
+// 获取 ST 上下文
+const getContext = () => {
+    return window.SillyTavern && window.SillyTavern.getContext ? window.SillyTavern.getContext() : null;
+}
+
+// 获取扩展设置（安全版）
 function getExtensionSettings() {
-    // 尝试从不同的全局位置获取设置对象
-    if (window.SillyTavern && window.SillyTavern.extension_settings) {
-        return window.SillyTavern.extension_settings;
+    const context = getContext();
+    if (context && context.extensionSettings) {
+        return context.extensionSettings;
     }
-    // 兼容旧版或特定上下文
+    // 回退兼容
     if (window.extension_settings) {
         return window.extension_settings;
     }
-    // 如果都找不到，返回 null，稍后重试
-    return null;
+    return {};
 }
 
-// 安全保存设置
+// 保存设置
 function saveExtensionSettings() {
-    if (window.SillyTavern && window.SillyTavern.saveSettingsDebounced) {
-        window.SillyTavern.saveSettingsDebounced();
-    } else if (window.saveSettingsDebounced) {
-        window.saveSettingsDebounced();
+    const context = getContext();
+    if (context && context.saveSettingsDebounced) {
+        context.saveSettingsDebounced();
     }
 }
 
-// 获取 Toast 通知
+// 通用 Toast 通知
 const toast = {
-    success: (msg) => window.toastr ? window.toastr.success(msg) : console.log("[Museum Success]", msg),
-    error: (msg) => window.toastr ? window.toastr.error(msg) : console.error("[Museum Error]", msg),
-    info: (msg) => window.toastr ? window.toastr.info(msg) : console.log("[Museum Info]", msg),
-    warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum Warning]", msg)
+    success: (msg) => window.toastr ? window.toastr.success(msg) : console.log("[Museum] " + msg),
+    error: (msg) => window.toastr ? window.toastr.error(msg) : console.error("[Museum] " + msg),
+    info: (msg) => window.toastr ? window.toastr.info(msg) : console.log("[Museum] " + msg),
+    warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- Supabase 逻辑 ---
+// --- Supabase 逻辑 (保持不变，因为这部分没问题) ---
 
 async function loadSupabase() {
     if (window.supabase) return;
@@ -47,7 +51,6 @@ async function loadSupabase() {
     console.log("[Museum] Loading Supabase SDK...");
     return new Promise((resolve, reject) => {
         const script = document.createElement('script');
-        // 使用更稳定的 JSDelivr UMD 版本，确保浏览器能直接运行
         script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.8/dist/umd/supabase.min.js";
         script.onload = () => {
             console.log("[Museum] Supabase SDK Loaded.");
@@ -62,17 +65,12 @@ async function loadSupabase() {
 }
 
 async function initSupabaseClient() {
-    const settings = getExtensionSettings()?.[EXTENSION_NAME];
+    const settings = getExtensionSettings()[EXTENSION_NAME];
     
-    if (!settings || !settings.sbUrl || !settings.sbKey) {
-        // 配置未填写，不报错，只是不做初始化
-        return false;
-    }
-
+    if (!settings || !settings.sbUrl || !settings.sbKey) return false;
     if (!window.supabase) await loadSupabase();
 
     try {
-        // 全局对象通常是 window.supabase.createClient
         const createClient = window.supabase.createClient || window.supabase.default.createClient;
         supabase = createClient(settings.sbUrl, settings.sbKey);
         
@@ -108,7 +106,7 @@ async function doLogin() {
     }
 }
 
-// --- UI 交互逻辑 ---
+// --- 数据获取与渲染 (保持不变) ---
 
 async function refreshGallery() {
     const grid = $('#museum-grid');
@@ -136,7 +134,7 @@ async function refreshGallery() {
 
         renderItems(data || []);
     } catch (e) {
-        toast.error("获取数据失败: " + e.message);
+        toast.error("获取失败: " + e.message);
         grid.html('<div style="text-align:center; padding:20px;">加载失败</div>');
     }
 }
@@ -155,7 +153,6 @@ function renderItems(items) {
         let typeLabel = "未知";
         let imgUrl = "";
         
-        // 解析数据
         if (item.type === 'role_card') {
             typeLabel = "角色";
             try {
@@ -202,14 +199,9 @@ function renderItems(items) {
     });
 }
 
-// --- 导入动作 ---
-
 async function handleImport(item) {
-    if (item.type === 'role_card') {
-        await importRoleCard(item);
-    } else if (item.type === 'beautify') {
-        await importBeautify(item);
-    }
+    if (item.type === 'role_card') await importRoleCard(item);
+    else if (item.type === 'beautify') await importBeautify(item);
 }
 
 async function importRoleCard(item) {
@@ -221,7 +213,6 @@ async function importRoleCard(item) {
         const response = await fetch(item.file_url);
         const blob = await response.blob();
         const file = new File([blob], "card.png", { type: blob.type });
-
         const formData = new FormData();
         formData.append('avatar', file);
 
@@ -230,15 +221,12 @@ async function importRoleCard(item) {
 
         if (result.file_name) {
             toast.success(`角色 "${result.name}" 已导入`);
-            // 刷新 ST 角色列表
-            if ($("#rm_button_characters").length) {
-                $("#rm_button_characters").click(); 
-            }
+            $("#rm_button_characters").click(); 
         } else {
             throw new Error("API 返回异常");
         }
     } catch (e) {
-        toast.error("角色导入失败: " + e.message);
+        toast.error("导入失败: " + e.message);
     } finally {
         btn.html(originalText);
     }
@@ -253,23 +241,23 @@ async function importBeautify(item) {
         let cssUrl = "";
         try {
             const json = JSON.parse(item.content);
-            if (json.variations && json.variations[0]) {
-                cssUrl = json.variations[0].file;
-            }
+            if (json.variations && json.variations[0]) cssUrl = json.variations[0].file;
         } catch(e) {}
 
         if (!cssUrl) throw new Error("未找到 CSS 链接");
-
         const res = await fetch(cssUrl);
         const cssText = await res.text();
-
         if (!cssText) throw new Error("CSS 内容为空");
 
         const textArea = document.getElementById('customCSS');
         if (textArea) {
             textArea.value = cssText;
             textArea.dispatchEvent(new Event('input', { bubbles: true }));
-            saveExtensionSettings(); // 触发 ST 全局保存
+            
+            // 触发 SillyTavern 保存逻辑
+            const context = getContext();
+            if (context && context.saveSettingsDebounced) context.saveSettingsDebounced();
+            
             toast.success("主题应用成功");
         } else {
             toast.warning("找不到 CSS 输入框，请确保您在用户设置界面");
@@ -281,15 +269,14 @@ async function importBeautify(item) {
     }
 }
 
-// --- UI 构建 ---
+// --- 界面创建 (参考参考代码的写法) ---
 
-function buildExtensionUI(settings) {
-    if ($('#museum-extension-root').length) return;
-
-    console.log("[Museum] Building UI...");
-
-    const html = `
-    <div id="museum-extension-root" class="inline-drawer wide100p flexFlowColumn">
+function createSettingsHtml() {
+    // 获取当前设置用于回填 HTML
+    const settings = getExtensionSettings()[EXTENSION_NAME] || {};
+    
+    return `
+    <div id="${EXTENSION_ID}" class="inline-drawer wide100p flexFlowColumn">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b><i class="fa-solid fa-building-columns"></i> 博物馆 (Museum)</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
@@ -324,14 +311,43 @@ function buildExtensionUI(settings) {
         </div>
     </div>
     `;
+}
 
-    // 尝试插入到 #extensions_settings2，如果不存在插入到 #extensions_settings
-    const target = $('#extensions_settings2').length ? $('#extensions_settings2') : $('#extensions_settings');
-    target.append(html);
+// --- 初始化逻辑 (模仿参考代码结构) ---
 
-    // 绑定事件
+function initializePlugin() {
+    console.log("[Museum] 初始化...");
+
+    // 1. 确保设置对象存在 (数据迁移/初始化)
+    const settings = getExtensionSettings();
+    if (settings && !settings[EXTENSION_NAME]) {
+        settings[EXTENSION_NAME] = { sbUrl: "", sbKey: "", sbEmail: "", sbPass: "" };
+        saveExtensionSettings();
+    }
+
+    // 2. 注入 HTML UI
+    const targetContainer = document.getElementById('extensions_settings'); // 优先左侧
+    const secondaryContainer = document.getElementById('extensions_settings2'); // 备选右侧
+    
+    // 如果已经存在，不重复注入
+    if (document.getElementById(EXTENSION_ID)) return;
+
+    const html = createSettingsHtml();
+    
+    // 逻辑：如果有右侧容器且不为空，插到右侧；否则插到左侧
+    if (secondaryContainer) {
+        secondaryContainer.insertAdjacentHTML('beforeend', html);
+    } else if (targetContainer) {
+        targetContainer.insertAdjacentHTML('beforeend', html);
+    } else {
+        console.error("[Museum] 找不到扩展面板容器 (#extensions_settings)");
+    }
+
+    // 3. 绑定事件监听 (jQuery)
+    // 切换配置面板
     $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
     
+    // 保存设置
     $('#museum-save-btn').on('click', async () => {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
         extSettings.sbUrl = $('#museum-sb-url').val().trim();
@@ -348,6 +364,7 @@ function buildExtensionUI(settings) {
         }
     });
 
+    // 过滤器切换
     $('.museum-filter-btn').on('click', function() {
         $('.museum-filter-btn').removeClass('active');
         $(this).addClass('active');
@@ -355,36 +372,40 @@ function buildExtensionUI(settings) {
         refreshGallery();
     });
 
+    // 刷新按钮
     $('#museum-refresh-btn').on('click', refreshGallery);
+
+    // 4. 预加载 Supabase SDK
+    loadSupabase().then(() => {
+        // 尝试自动登录并加载（如果已配置）
+        const s = getExtensionSettings()[EXTENSION_NAME];
+        if (s && s.sbUrl && s.sbKey) {
+            initSupabaseClient().then(() => {
+                if (session) refreshGallery();
+            });
+        }
+    });
+
+    console.log("[Museum] 初始化完成");
 }
 
-// --- 初始化入口 ---
-
-// 循环检查直到 SillyTavern 准备就绪
-const initInterval = setInterval(() => {
-    // 尝试获取设置对象
-    const settings = getExtensionSettings();
-    
-    // 如果设置对象存在（说明ST已经加载了核心JS）
-    if (settings) {
-        clearInterval(initInterval);
-        
-        // 确保本扩展的设置对象已初始化
-        if (!settings[EXTENSION_NAME]) {
-            settings[EXTENSION_NAME] = {
-                sbUrl: "", sbKey: "", sbEmail: "", sbPass: ""
-            };
-            saveExtensionSettings();
+// --- 启动器 (IIFE) ---
+(function () {
+    // 递归等待 SillyTavern 上下文就绪
+    const waitForSillyTavernContext = () => {
+        const context = getContext();
+        if (context && context.eventSource && context.eventTypes) {
+            // 监听 APP_READY 事件
+            // 此时 settings.json 已加载，DOM 已构建
+            context.eventSource.once(context.eventTypes.APP_READY, () => {
+                // 给一点小延迟确保 DOM 容器完全渲染
+                setTimeout(initializePlugin, 500);
+            });
+        } else {
+            // 还没准备好，稍后再试
+            setTimeout(waitForSillyTavernContext, 100);
         }
+    };
 
-        console.log("[Museum] SillyTavern Ready. Initializing Extension...");
-        
-        // 开始加载 SDK 并构建 UI
-        loadSupabase();
-        
-        // 稍微延迟 UI 构建以确保 DOM 元素存在
-        setTimeout(() => {
-            buildExtensionUI(settings[EXTENSION_NAME]);
-        }, 500);
-    }
-}, 500); // 每500毫秒检查一次
+    waitForSillyTavernContext();
+})();

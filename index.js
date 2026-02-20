@@ -43,12 +43,10 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- Supabase 逻辑 (保持不变，因为这部分没问题) ---
-// 增强版加载函数：自动重试多个源
+// --- Supabase 逻辑 ---
 async function loadSupabase() {
     if (window.supabase) return;
     
-    // 备选 CDN 列表 (优先尝试 unpkg，然后是 cloudflare，最后 jsdelivr)
     const sources = [
         "https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js",
         "https://cdnjs.cloudflare.com/ajax/libs/supabase.js/2.39.7/supabase.min.js",
@@ -57,7 +55,6 @@ async function loadSupabase() {
 
     console.log("[Museum] 正在加载 Supabase SDK...");
 
-    // 辅助函数：尝试加载单个脚本
     const tryLoadScript = (url) => {
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
@@ -68,31 +65,26 @@ async function loadSupabase() {
             };
             script.onerror = () => {
                 console.warn(`[Museum] 无法加载: ${url}`);
-                document.head.removeChild(script); // 失败移除
+                document.head.removeChild(script); 
                 reject();
             };
             document.head.appendChild(script);
         });
     };
 
-    // 顺序尝试列表中的 URL
     for (const url of sources) {
         try {
             await tryLoadScript(url);
-            return; // 加载成功，直接返回
+            return; 
         } catch (e) {
-            // 当前 URL 失败，继续尝试下一个
             continue;
         }
     }
 
-    // 如果所有都失败了
-    const errorMsg = "[Museum] 错误：所有 CDN 源均无法连接，请检查网络代理或将 supabase.js 下载到本地。";
+    const errorMsg = "[Museum] 错误：所有 CDN 源均无法连接，请检查网络代理。";
     console.error(errorMsg);
-    if (window.toastr) window.toastr.error("无法加载 Supabase 组件，请检查控制台 (F12)");
-    throw new Error(errorMsg);
+    if (window.toastr) window.toastr.error("无法加载 Supabase 组件");
 }
-
 
 async function initSupabaseClient() {
     const settings = getExtensionSettings()[EXTENSION_NAME];
@@ -136,7 +128,7 @@ async function doLogin() {
     }
 }
 
-// --- 数据获取与渲染 (保持不变) ---
+// --- 数据获取与渲染 ---
 
 async function refreshGallery() {
     const grid = $('#museum-grid');
@@ -169,14 +161,11 @@ async function refreshGallery() {
     }
 }
 
-// --- 数据获取与渲染 ---
-
 function renderItems(items) {
     const grid = $('#museum-grid');
     grid.empty();
 
     if (items.length === 0) {
-        // 使用 ST 标准文字颜色变量
         grid.html('<div style="text-align:center; padding:20px; opacity: 0.7; color: var(--SmartThemeBodyColor);">暂无内容</div>');
         return;
     }
@@ -187,7 +176,6 @@ function renderItems(items) {
         let imgUrl = "";
         let variations = [];
         
-        // ... (数据解析逻辑保持不变) ...
         if (item.type === 'role_card') {
             typeLabel = "角色";
             try {
@@ -212,7 +200,6 @@ function renderItems(items) {
             } catch (e) { }
         }
 
-        // 构建颜色小圆点
         let colorDotsHtml = '';
         if (item.type === 'beautify' && variations.length > 0) {
             colorDotsHtml = '<div class="museum-color-dots">';
@@ -227,7 +214,6 @@ function renderItems(items) {
             colorDotsHtml += '</div>';
         }
 
-        // 使用纯 Class 的 HTML 模板，样式全靠上面的 CSS 文件控制
         const cardHtml = `
             <div class="museum-item" data-id="${item.id}">
                 <div class="museum-thumb-container">
@@ -248,7 +234,6 @@ function renderItems(items) {
         
         const $card = $(cardHtml);
 
-        // 绑定颜色切换事件
         if (item.type === 'beautify') {
             $card.find('.color-dot').on('click', function(e) {
                 e.stopPropagation();
@@ -256,7 +241,6 @@ function renderItems(items) {
                 const idx = $this.data('idx');
                 const selectedVar = variations[idx];
 
-                // 更新圆点高亮样式 (使用 CSS 变量)
                 $card.find('.color-dot').css({'box-shadow': 'none', 'transform': 'none'});
                 $this.css({
                     'box-shadow': '0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor)',
@@ -282,28 +266,253 @@ function renderItems(items) {
 
 async function handleImport(item, $card) {
     if (item.type === 'role_card') {
-        // 你原有的角色卡导入逻辑
-        if (typeof importRoleCard === 'function') {
-            await importRoleCard(item);
-        } else {
-            toast.warning("角色卡导入函数未定义");
-        }
+        // 调用我们新写的角色卡导入逻辑
+        await importRoleCard(item);
     } else if (item.type === 'beautify') {
-        // 调用新的美化导入逻辑，需传入卡片元素以便知道当前选了哪个颜色
         await importBeautifyDirectly(item, $card);
     }
 }
 
-// 直接导入美化 UI 主题
+// === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
+
+async function importRoleCard(item) {
+    // 1. 注入 CSS 样式（如果还没注入）
+    if (!$('#museum-role-styles').length) {
+        $('head').append(`
+            <style id="museum-role-styles">
+                .museum-role-desc { 
+                    background: rgba(0,0,0,0.2); 
+                    padding: 15px; 
+                    border-radius: 8px; 
+                    font-size: 0.9em; 
+                    line-height: 1.5; 
+                    margin-bottom: 20px; 
+                    max-height: 150px; 
+                    overflow-y: auto; 
+                    white-space: pre-wrap;
+                    border-left: 3px solid var(--SmartThemeQuoteColor, #9abdf5);
+                }
+                .museum-timeline {
+                    position: relative;
+                    padding-left: 20px;
+                    max-height: 300px;
+                    overflow-y: auto;
+                }
+                .museum-timeline::before {
+                    content: '';
+                    position: absolute;
+                    left: 7px;
+                    top: 5px;
+                    bottom: 5px;
+                    width: 2px;
+                    background: rgba(255,255,255,0.1);
+                }
+                .museum-timeline-item {
+                    position: relative;
+                    margin-bottom: 15px;
+                    padding-bottom: 15px;
+                    border-bottom: 1px solid rgba(255,255,255,0.05);
+                }
+                .museum-timeline-item:last-child { border: none; }
+                .museum-timeline-dot {
+                    position: absolute;
+                    left: -17px;
+                    top: 5px;
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    background: var(--SmartThemeQuoteColor, #9abdf5);
+                    box-shadow: 0 0 0 3px rgba(0,0,0,0.3);
+                }
+                .museum-timeline-item.latest .museum-timeline-dot {
+                    background: #4caf50;
+                }
+                .museum-version-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 5px;
+                }
+                .museum-version-date { font-weight: bold; font-size: 0.9em; }
+                .museum-version-note { font-size: 0.85em; opacity: 0.7; margin-bottom: 8px; font-style: italic;}
+                .museum-btn-sm {
+                    padding: 4px 10px;
+                    font-size: 0.8em;
+                    border-radius: 4px;
+                    border: 1px solid var(--SmartThemeBorderColor, #555);
+                    background: transparent;
+                    color: var(--SmartThemeBodyColor, #fff);
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                .museum-btn-sm:hover {
+                    background: var(--SmartThemeQuoteColor, #9abdf5);
+                    color: #000;
+                    border-color: var(--SmartThemeQuoteColor, #9abdf5);
+                }
+            </style>
+        `);
+    }
+
+    // 2. 解析数据
+    let data;
+    try {
+        data = JSON.parse(item.content);
+    } catch (e) {
+        data = { name: item.content, description: "暂无介绍", history: [] };
+    }
+
+    // 格式化历史记录（如果没有，就造一个当前版本的）
+    let history = data.history || [];
+    if (history.length === 0 && item.file_url) {
+        history.push({
+            date: item.created_at,
+            png: item.file_url,
+            note: "初始版本"
+        });
+    }
+
+    const formatDate = (ts) => {
+        if (!ts) return '未知时间';
+        return new Date(ts).toLocaleString();
+    };
+
+    // 3. 构建时间轴 HTML
+    let timelineHtml = '';
+    history.forEach((ver, idx) => {
+        const isLatest = idx === 0 ? 'latest' : '';
+        const label = idx === 0 ? '(最新)' : '';
+        const note = ver.note ? ver.note : '无更新说明';
+        
+        // 只有有 PNG 链接的才能导入
+        const actionBtn = ver.png 
+            ? `<button class="museum-btn-sm import-role-btn" data-url="${ver.png}" data-name="${data.name}">
+                 <i class="fa-solid fa-download"></i> 导入
+               </button>`
+            : `<span style="font-size:0.8em; opacity:0.5;">文件丢失</span>`;
+
+        timelineHtml += `
+            <div class="museum-timeline-item ${isLatest}">
+                <div class="museum-timeline-dot"></div>
+                <div class="museum-version-header">
+                    <div class="museum-version-date">${formatDate(ver.date)} <span style="color:#4caf50">${label}</span></div>
+                    ${actionBtn}
+                </div>
+                <div class="museum-version-note">${note}</div>
+            </div>
+        `;
+    });
+
+    // 4. 构建弹窗 HTML (复用你现有的弹窗样式)
+    const modalHtml = `
+    <div id="museum-role-modal" class="museum-modal-overlay">
+        <div class="museum-modal-content" style="max-width: 500px;">
+            <div class="museum-modal-header">
+                <div class="museum-modal-title"><i class="fa-solid fa-user-tag"></i> ${data.name || '角色详情'}</div>
+                <button class="museum-modal-close-icon" id="museum-role-close">&times;</button>
+            </div>
+            
+            <div style="display:flex; gap:15px; margin-bottom:15px;">
+                <!-- 左侧：最新封面 -->
+                <div style="flex-shrink:0; width: 100px;">
+                    <img src="${item.file_url}" style="width:100%; border-radius:6px; aspect-ratio: 2/3; object-fit: cover;">
+                </div>
+                <!-- 右侧：描述 -->
+                <div style="flex-grow:1; display:flex; flex-direction:column;">
+                    <div style="font-size:0.8em; opacity:0.7; margin-bottom:5px;">角色介绍:</div>
+                    <div class="museum-role-desc custom-scroll">${data.description || '暂无介绍'}</div>
+                </div>
+            </div>
+
+            <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                版本历史:
+            </div>
+            
+            <div class="museum-timeline custom-scroll">
+                ${timelineHtml}
+            </div>
+        </div>
+    </div>
+    `;
+
+    // 5. 显示弹窗
+    $('#museum-role-modal').remove();
+    $('body').append(modalHtml);
+
+    // 6. 绑定关闭事件
+    const closeModal = () => $('#museum-role-modal').remove();
+    $('#museum-role-close').on('click', closeModal);
+    $('#museum-role-modal').on('click', (e) => {
+        if (e.target.id === 'museum-role-modal') closeModal();
+    });
+
+    // 7. 绑定“导入”按钮点击事件
+    $('.import-role-btn').on('click', async function() {
+        const url = $(this).data('url');
+        const name = $(this).data('name');
+        const btn = $(this);
+        const originalText = btn.html();
+
+        btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
+        
+        // 调用执行导入的函数
+        await performCharacterImport(url, name);
+        
+        btn.html('<i class="fa-solid fa-check"></i>');
+        setTimeout(() => btn.html(originalText), 2000);
+    });
+}
+
+// 模拟 ST 原生导入逻辑
+async function performCharacterImport(url, charName) {
+    try {
+        if (!url) throw new Error("无效的文件链接");
+
+        // 1. 下载图片 Blob
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`下载失败: ${res.status}`);
+        const blob = await res.blob();
+
+        // 2. 构造 File 对象
+        let ext = 'png';
+        if (blob.type.includes('json') || url.endsWith('.json')) ext = 'json';
+        
+        // 文件名处理，防止非法字符
+        const cleanName = (charName || 'character').replace(/[^a-zA-Z0-9\u4e00-\u9fa5-_]/g, '_');
+        const filename = `${cleanName}.${ext}`;
+        const file = new File([blob], filename, { type: blob.type });
+
+        // 3. 寻找 SillyTavern 的导入输入框 (character_import_button 对应的 input)
+        const stImportInput = document.getElementById('character_import_file');
+        
+        if (!stImportInput) {
+            throw new Error("找不到 SillyTavern 的角色导入组件 (#character_import_file)");
+        }
+
+        // 4. 利用 DataTransfer 将 File 对象塞进 input
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        stImportInput.files = dataTransfer.files;
+
+        // 5. 触发 change 事件，让 ST 接管后续逻辑
+        const changeEvent = new Event('change', { bubbles: true });
+        stImportInput.dispatchEvent(changeEvent);
+
+        toast.success(`正在导入角色: ${charName}`);
+
+    } catch (e) {
+        console.error(e);
+        toast.error(`导入失败: ${e.message}`);
+    }
+}
+
+// 美化主题导入
 async function importBeautifyDirectly(item, $card) {
     const btn = $card.find('.import-btn');
     const originalText = btn.html();
     
     try {
-        // 1. 获取当前选中的索引
         const selectedIdx = $card.find('.museum-selected-idx').data('idx') || 0;
-        
-        // 2. 解析数据
         const json = JSON.parse(item.content);
         const variations = json.variations || [];
         const selectedVar = variations[selectedIdx];
@@ -317,44 +526,27 @@ async function importBeautifyDirectly(item, $card) {
 
         btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 下载中...');
 
-        // 3. 核心：下载这个 .json 文件
         const response = await fetch(themeUrl);
         if (!response.ok) throw new Error(`网络请求失败: ${response.status}`);
         
         const blob = await response.blob();
-        
-        // 确保下载的是 JSON 文件
-        if (!themeUrl.includes('.json') && blob.type !== 'application/json') {
-             toast.warning("文件类型似乎不是标准的 JSON，尝试强制导入...");
-        }
-
-        // 4. 将 Blob 包装成 File 对象
-        // 生成一个安全的文件名
         const fileName = `${themeName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}.json`;
         const file = new File([blob], fileName, { type: "application/json" });
 
         btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 导入中...');
 
-        // 5. 模拟 SillyTavern 的 UI 主题文件上传机制
-        // ST 原生的文件输入框
         const stThemeInput = document.getElementById('ui_preset_import_file');
-        
-        if (!stThemeInput) {
-            throw new Error("找不到 SillyTavern 的主题导入组件 (#ui_preset_import_file)");
-        }
+        if (!stThemeInput) throw new Error("找不到 ST 主题导入组件");
 
-        // 利用 DataTransfer 将 File 对象塞进 <input type="file"> 中
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
         stThemeInput.files = dataTransfer.files;
 
-        // 触发 change 事件，SillyTavern 原生代码会监听此事件并解析应用主题
         const changeEvent = new Event('change', { bubbles: true });
         stThemeInput.dispatchEvent(changeEvent);
 
         toast.success(`主题 "${themeName}" 已成功导入！`);
         
-        // 提示用户可能需要手动在下拉列表中选中（ST导入后往往会自动选中并刷新UI）
         setTimeout(() => {
             btn.html('<i class="fa-solid fa-check"></i> 成功');
             setTimeout(() => btn.html(originalText), 2000);
@@ -367,219 +559,9 @@ async function importBeautifyDirectly(item, $card) {
     }
 }
 
-// 智能美化导入：处理多变体
-async function importBeautifySmart(item) {
-    const btn = $(`div[data-id="${item.id}"] .import-btn`);
-    const originalText = btn.html();
-    
-    try {
-        // 1. 解析 JSON 内容
-        let variations = [];
-        let title = "未知主题";
-        try {
-            const json = JSON.parse(item.content);
-            title = json.title || title;
-            variations = json.variations || [];
-        } catch (e) {
-            console.error("JSON 解析失败", e);
-            throw new Error("数据格式错误");
-        }
-
-        if (!variations || variations.length === 0) {
-            throw new Error("该主题没有包含任何配色方案");
-        }
-
-        // 修改：无论数量多少，统一通过弹窗展示，方便用户预览
-        showVariationModal(title, variations);
-
-    } catch (e) {
-        toast.error("准备导入失败: " + e.message);
-    } 
-    // 注意：如果是弹窗模式，这里不需要 finally 恢复文字，因为弹窗是异步的
-}
-
-
-// 显示选择弹窗 (增强版：带预览)
-function showVariationModal(title, variations) {
-    // 移除旧弹窗（防止重复）
-    $('#museum-variation-modal').remove();
-
-    // 默认选中第一个
-    let selectedIndex = 0;
-
-    // 构建变体按钮 HTML
-    let buttonsHtml = '';
-    variations.forEach((v, index) => {
-        const name = v.name || `样式 ${index + 1}`;
-        const activeClass = index === 0 ? 'active' : '';
-        // 使用 color 属性来设置小圆点颜色，如果没有则用灰色
-        const colorStyle = v.color ? `background-color:${v.color};` : `background-color:#ccc;`;
-        
-        buttonsHtml += `
-            <div class="museum-variation-chip ${activeClass}" data-index="${index}">
-                <span class="museum-chip-color" style="${colorStyle}"></span>
-                <span class="museum-chip-text">${name}</span>
-            </div>
-        `;
-    });
-
-    // 获取当前预览图
-    const currentPreview = variations[0].preview || '';
-
-    const modalHtml = `
-    <div id="museum-variation-modal" class="museum-modal-overlay">
-        <div class="museum-modal-content" style="max-width: 400px;">
-            <div class="museum-modal-header">
-                <div class="museum-modal-title">导入主题: ${title}</div>
-                <button class="museum-modal-close-icon" id="museum-modal-cancel-icon">&times;</button>
-            </div>
-            
-            <!-- 预览图区域 -->
-            <div class="museum-preview-container">
-                <img id="museum-modal-preview-img" src="${currentPreview}" class="museum-preview-img" alt="预览图加载失败">
-                <div class="museum-preview-loading" style="display:none;">加载中...</div>
-            </div>
-
-            <div style="margin:15px 0 5px; font-size:0.8em; opacity:0.7;">选择配色方案:</div>
-            
-            <!-- 选项列表 -->
-            <div class="museum-variation-chips-container">
-                ${buttonsHtml}
-            </div>
-
-            <div class="museum-modal-footer">
-                <button class="museum-btn-secondary" id="museum-modal-cancel">取消</button>
-                <button class="museum-btn-primary" id="museum-modal-confirm">导入选中样式</button>
-            </div>
-        </div>
-    </div>
-    `;
-
-    // 插入 DOM
-    $('body').append(modalHtml);
-
-    // 注入临时样式 (为了保证弹窗好看，直接在这里补样式，也可以写在 CSS 文件里)
-    if (!$('#museum-modal-styles').length) {
-        $('head').append(`
-            <style id="museum-modal-styles">
-                .museum-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; bg: rgba(0,0,0,0.7); backdrop-filter: blur(5px); z-index: 9999; display: flex; align-items: center; justify-content: center; }
-                .museum-modal-content { background: var(--SmartThemeBgColor, #1a1b26); color: var(--SmartThemeBodyColor, #fff); padding: 20px; border-radius: 12px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--SmartThemeBorderColor, #333); display: flex; flex-direction: column; }
-                .museum-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-                .museum-modal-title { font-weight: bold; font-size: 1.1em; }
-                .museum-modal-close-icon { background: none; border: none; color: inherit; font-size: 1.5em; cursor: pointer; opacity: 0.7; }
-                
-                .museum-preview-container { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; position: relative; border: 1px solid var(--SmartThemeBorderColor, #333); }
-                .museum-preview-img { width: 100%; height: 100%; object-fit: cover; transition: opacity 0.3s; }
-                
-                .museum-variation-chips-container { display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow-y: auto; margin-bottom: 20px; }
-                .museum-variation-chip { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid transparent; border-radius: 20px; cursor: pointer; transition: all 0.2s; font-size: 0.9em; }
-                .museum-variation-chip:hover { background: rgba(255,255,255,0.1); }
-                .museum-variation-chip.active { background: rgba(255,255,255,0.15); border-color: var(--SmartThemeQuoteColor, #9abdf5); box-shadow: 0 0 10px rgba(0,0,0,0.2); }
-                .museum-chip-color { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); }
-                
-                .museum-modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
-                .museum-btn-primary { background: var(--SmartThemeQuoteColor, #9abdf5); color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-                .museum-btn-secondary { background: transparent; color: inherit; border: 1px solid var(--SmartThemeBorderColor, #555); padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-                .museum-btn-primary:hover { opacity: 0.9; }
-                .museum-btn-secondary:hover { background: rgba(255,255,255,0.05); }
-            </style>
-        `);
-    }
-
-    // --- 绑定事件 ---
-
-    // 1. 点击选项切换预览
-    $('.museum-variation-chip').on('click', function() {
-        const index = $(this).data('index');
-        
-        // 只有切换时才更新
-        if (selectedIndex === index) return;
-        
-        selectedIndex = index;
-        
-        // 更新 UI 状态
-        $('.museum-variation-chip').removeClass('active');
-        $(this).addClass('active');
-        
-        // 更新预览图
-        const newPreview = variations[index].preview;
-        if (newPreview) {
-            const img = $('#museum-modal-preview-img');
-            img.css('opacity', 0.5); // 简单的淡出效果
-            img.attr('src', newPreview);
-            img.on('load', () => img.css('opacity', 1));
-        }
-    });
-
-    // 2. 确认导入
-    $('#museum-modal-confirm').on('click', async function() {
-        const selectedVar = variations[selectedIndex];
-        if (!selectedVar) return;
-
-        const url = selectedVar.file;
-        const name = selectedVar.name || `样式 ${selectedIndex + 1}`;
-
-        // 关闭弹窗
-        $('#museum-variation-modal').remove();
-
-        // 执行导入
-        toast.info(`正在下载主题: ${name}...`);
-        await applyThemeUrl(url, name);
-    });
-
-    // 3. 关闭逻辑
-    const closeModal = () => $('#museum-variation-modal').remove();
-    $('#museum-modal-cancel').on('click', closeModal);
-    $('#museum-modal-cancel-icon').on('click', closeModal);
-    $('#museum-variation-modal').on('click', (e) => {
-        if (e.target.id === 'museum-variation-modal') closeModal();
-    });
-}
-
-
-// 执行具体的 CSS 下载与应用
-async function applyThemeUrl(cssUrl, themeName) {
-    try {
-        if (!cssUrl) throw new Error("CSS 链接无效");
-
-        // 使用 fetch 获取 CSS 文本
-        const res = await fetch(cssUrl);
-        if (!res.ok) throw new Error(`下载失败: ${res.status}`);
-        const cssText = await res.text();
-
-        if (!cssText || cssText.trim().length === 0) throw new Error("CSS 内容为空");
-
-        // 寻找 SillyTavern 的自定义 CSS 输入框
-        const textArea = document.getElementById('customCSS');
-        if (textArea) {
-            // 写入内容
-            textArea.value = cssText;
-            // 触发 input 事件以通知 ST 保存
-            textArea.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            // 强制触发保存设置
-            const context = window.SillyTavern && window.SillyTavern.getContext ? window.SillyTavern.getContext() : null;
-            if (context && context.saveSettingsDebounced) {
-                context.saveSettingsDebounced();
-            } else if (window.saveSettingsDebounced) {
-                window.saveSettingsDebounced();
-            }
-
-            toast.success(`主题 "${themeName}" 应用成功！`);
-        } else {
-            toast.warning("找不到 CSS 输入框，请确保您已打开用户设置面板。");
-        }
-    } catch (e) {
-        console.error(e);
-        toast.error(`应用失败: ${e.message}`);
-    }
-}
-
-
-// --- 界面创建 (参考参考代码的写法) ---
+// --- 界面创建 ---
 
 function createSettingsHtml() {
-    // 获取当前设置用于回填 HTML
     const settings = getExtensionSettings()[EXTENSION_NAME] || {};
     
     return `
@@ -620,28 +602,24 @@ function createSettingsHtml() {
     `;
 }
 
-// --- 初始化逻辑 (模仿参考代码结构) ---
+// --- 初始化逻辑 ---
 
 function initializePlugin() {
     console.log("[Museum] 初始化...");
 
-    // 1. 确保设置对象存在 (数据迁移/初始化)
     const settings = getExtensionSettings();
     if (settings && !settings[EXTENSION_NAME]) {
         settings[EXTENSION_NAME] = { sbUrl: "", sbKey: "", sbEmail: "", sbPass: "" };
         saveExtensionSettings();
     }
 
-    // 2. 注入 HTML UI
-    const targetContainer = document.getElementById('extensions_settings'); // 优先左侧
-    const secondaryContainer = document.getElementById('extensions_settings2'); // 备选右侧
+    const targetContainer = document.getElementById('extensions_settings');
+    const secondaryContainer = document.getElementById('extensions_settings2');
     
-    // 如果已经存在，不重复注入
     if (document.getElementById(EXTENSION_ID)) return;
 
     const html = createSettingsHtml();
     
-    // 逻辑：如果有右侧容器且不为空，插到右侧；否则插到左侧
     if (secondaryContainer) {
         secondaryContainer.insertAdjacentHTML('beforeend', html);
     } else if (targetContainer) {
@@ -650,11 +628,9 @@ function initializePlugin() {
         console.error("[Museum] 找不到扩展面板容器 (#extensions_settings)");
     }
 
-    // 3. 绑定事件监听 (jQuery)
-    // 切换配置面板
+    // 绑定事件
     $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
     
-    // 保存设置
     $('#museum-save-btn').on('click', async () => {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
         extSettings.sbUrl = $('#museum-sb-url').val().trim();
@@ -671,7 +647,6 @@ function initializePlugin() {
         }
     });
 
-    // 过滤器切换
     $('.museum-filter-btn').on('click', function() {
         $('.museum-filter-btn').removeClass('active');
         $(this).addClass('active');
@@ -679,12 +654,9 @@ function initializePlugin() {
         refreshGallery();
     });
 
-    // 刷新按钮
     $('#museum-refresh-btn').on('click', refreshGallery);
 
-    // 4. 预加载 Supabase SDK
     loadSupabase().then(() => {
-        // 尝试自动登录并加载（如果已配置）
         const s = getExtensionSettings()[EXTENSION_NAME];
         if (s && s.sbUrl && s.sbKey) {
             initSupabaseClient().then(() => {
@@ -696,20 +668,15 @@ function initializePlugin() {
     console.log("[Museum] 初始化完成");
 }
 
-// --- 启动器 (IIFE) ---
+// --- 启动器 ---
 (function () {
-    // 递归等待 SillyTavern 上下文就绪
     const waitForSillyTavernContext = () => {
         const context = getContext();
         if (context && context.eventSource && context.eventTypes) {
-            // 监听 APP_READY 事件
-            // 此时 settings.json 已加载，DOM 已构建
             context.eventSource.once(context.eventTypes.APP_READY, () => {
-                // 给一点小延迟确保 DOM 容器完全渲染
                 setTimeout(initializePlugin, 500);
             });
         } else {
-            // 还没准备好，稍后再试
             setTimeout(waitForSillyTavernContext, 100);
         }
     };

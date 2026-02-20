@@ -262,49 +262,68 @@ async function importBeautifySmart(item) {
             throw new Error("该主题没有包含任何配色方案");
         }
 
-        // 2. 判断变体数量
-        if (variations.length === 1) {
-            // 只有一种，直接导入
-            btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
-            await applyThemeUrl(variations[0].file, variations[0].name);
-        } else {
-            // 有多种，弹出选择框
-            showVariationModal(title, variations);
-        }
+        // 修改：无论数量多少，统一通过弹窗展示，方便用户预览
+        showVariationModal(title, variations);
 
     } catch (e) {
         toast.error("准备导入失败: " + e.message);
-    } finally {
-        // 只有在单次直接导入失败时恢复按钮，弹窗模式下保持原样即可
-        if (btn.html().includes('spinner')) {
-            btn.html(originalText);
-        }
-    }
+    } 
+    // 注意：如果是弹窗模式，这里不需要 finally 恢复文字，因为弹窗是异步的
 }
 
-// 显示选择弹窗
+
+// 显示选择弹窗 (增强版：带预览)
 function showVariationModal(title, variations) {
     // 移除旧弹窗（防止重复）
     $('#museum-variation-modal').remove();
 
-    // 构建 HTML
+    // 默认选中第一个
+    let selectedIndex = 0;
+
+    // 构建变体按钮 HTML
     let buttonsHtml = '';
     variations.forEach((v, index) => {
-        // 优先显示 name，没有则显示 "样式 N"
         const name = v.name || `样式 ${index + 1}`;
-        // 将 url 编码存入 data 属性，防止引号问题
-        buttonsHtml += `<div class="museum-variation-btn" data-url="${v.file}" data-name="${name}">${name}</div>`;
+        const activeClass = index === 0 ? 'active' : '';
+        // 使用 color 属性来设置小圆点颜色，如果没有则用灰色
+        const colorStyle = v.color ? `background-color:${v.color};` : `background-color:#ccc;`;
+        
+        buttonsHtml += `
+            <div class="museum-variation-chip ${activeClass}" data-index="${index}">
+                <span class="museum-chip-color" style="${colorStyle}"></span>
+                <span class="museum-chip-text">${name}</span>
+            </div>
+        `;
     });
+
+    // 获取当前预览图
+    const currentPreview = variations[0].preview || '';
 
     const modalHtml = `
     <div id="museum-variation-modal" class="museum-modal-overlay">
-        <div class="museum-modal-content">
-            <div class="museum-modal-title">导入: ${title}</div>
-            <div style="margin-bottom:10px; font-size:0.9em; opacity:0.8;">请选择配色方案</div>
-            <div class="museum-variation-list">
+        <div class="museum-modal-content" style="max-width: 400px;">
+            <div class="museum-modal-header">
+                <div class="museum-modal-title">导入主题: ${title}</div>
+                <button class="museum-modal-close-icon" id="museum-modal-cancel-icon">&times;</button>
+            </div>
+            
+            <!-- 预览图区域 -->
+            <div class="museum-preview-container">
+                <img id="museum-modal-preview-img" src="${currentPreview}" class="museum-preview-img" alt="预览图加载失败">
+                <div class="museum-preview-loading" style="display:none;">加载中...</div>
+            </div>
+
+            <div style="margin:15px 0 5px; font-size:0.8em; opacity:0.7;">选择配色方案:</div>
+            
+            <!-- 选项列表 -->
+            <div class="museum-variation-chips-container">
                 ${buttonsHtml}
             </div>
-            <button class="museum-modal-close" id="museum-modal-cancel">取消</button>
+
+            <div class="museum-modal-footer">
+                <button class="museum-btn-secondary" id="museum-modal-cancel">取消</button>
+                <button class="museum-btn-primary" id="museum-modal-confirm">导入选中样式</button>
+            </div>
         </div>
     </div>
     `;
@@ -312,26 +331,84 @@ function showVariationModal(title, variations) {
     // 插入 DOM
     $('body').append(modalHtml);
 
-    // 绑定事件
-    // 1. 点击具体样式
-    $('.museum-variation-btn').on('click', async function() {
-        const url = $(this).data('url');
-        const name = $(this).data('name');
+    // 注入临时样式 (为了保证弹窗好看，直接在这里补样式，也可以写在 CSS 文件里)
+    if (!$('#museum-modal-styles').length) {
+        $('head').append(`
+            <style id="museum-modal-styles">
+                .museum-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; bg: rgba(0,0,0,0.7); backdrop-filter: blur(5px); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+                .museum-modal-content { background: var(--SmartThemeBgColor, #1a1b26); color: var(--SmartThemeBodyColor, #fff); padding: 20px; border-radius: 12px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid var(--SmartThemeBorderColor, #333); display: flex; flex-direction: column; }
+                .museum-modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+                .museum-modal-title { font-weight: bold; font-size: 1.1em; }
+                .museum-modal-close-icon { background: none; border: none; color: inherit; font-size: 1.5em; cursor: pointer; opacity: 0.7; }
+                
+                .museum-preview-container { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; position: relative; border: 1px solid var(--SmartThemeBorderColor, #333); }
+                .museum-preview-img { width: 100%; height: 100%; object-fit: cover; transition: opacity 0.3s; }
+                
+                .museum-variation-chips-container { display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow-y: auto; margin-bottom: 20px; }
+                .museum-variation-chip { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid transparent; border-radius: 20px; cursor: pointer; transition: all 0.2s; font-size: 0.9em; }
+                .museum-variation-chip:hover { background: rgba(255,255,255,0.1); }
+                .museum-variation-chip.active { background: rgba(255,255,255,0.15); border-color: var(--SmartThemeQuoteColor, #9abdf5); box-shadow: 0 0 10px rgba(0,0,0,0.2); }
+                .museum-chip-color { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); }
+                
+                .museum-modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
+                .museum-btn-primary { background: var(--SmartThemeQuoteColor, #9abdf5); color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+                .museum-btn-secondary { background: transparent; color: inherit; border: 1px solid var(--SmartThemeBorderColor, #555); padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+                .museum-btn-primary:hover { opacity: 0.9; }
+                .museum-btn-secondary:hover { background: rgba(255,255,255,0.05); }
+            </style>
+        `);
+    }
+
+    // --- 绑定事件 ---
+
+    // 1. 点击选项切换预览
+    $('.museum-variation-chip').on('click', function() {
+        const index = $(this).data('index');
         
+        // 只有切换时才更新
+        if (selectedIndex === index) return;
+        
+        selectedIndex = index;
+        
+        // 更新 UI 状态
+        $('.museum-variation-chip').removeClass('active');
+        $(this).addClass('active');
+        
+        // 更新预览图
+        const newPreview = variations[index].preview;
+        if (newPreview) {
+            const img = $('#museum-modal-preview-img');
+            img.css('opacity', 0.5); // 简单的淡出效果
+            img.attr('src', newPreview);
+            img.on('load', () => img.css('opacity', 1));
+        }
+    });
+
+    // 2. 确认导入
+    $('#museum-modal-confirm').on('click', async function() {
+        const selectedVar = variations[selectedIndex];
+        if (!selectedVar) return;
+
+        const url = selectedVar.file;
+        const name = selectedVar.name || `样式 ${selectedIndex + 1}`;
+
         // 关闭弹窗
         $('#museum-variation-modal').remove();
-        
+
         // 执行导入
         toast.info(`正在下载主题: ${name}...`);
         await applyThemeUrl(url, name);
     });
 
-    // 2. 点击取消或遮罩层
-    $('#museum-modal-cancel').on('click', () => $('#museum-variation-modal').remove());
+    // 3. 关闭逻辑
+    const closeModal = () => $('#museum-variation-modal').remove();
+    $('#museum-modal-cancel').on('click', closeModal);
+    $('#museum-modal-cancel-icon').on('click', closeModal);
     $('#museum-variation-modal').on('click', (e) => {
-        if (e.target.id === 'museum-variation-modal') $('#museum-variation-modal').remove();
+        if (e.target.id === 'museum-variation-modal') closeModal();
     });
 }
+
 
 // 执行具体的 CSS 下载与应用
 async function applyThemeUrl(cssUrl, themeName) {

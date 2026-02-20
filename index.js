@@ -43,6 +43,321 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
+// --- 样式注入 (核心修改：配色适配 & 布局调整) ---
+function injectStyles() {
+    if ($('#museum-extension-styles').length) return;
+
+    const css = `
+        /* === 博物馆主界面网格布局 === */
+        .museum-grid {
+            display: grid;
+            gap: 10px;
+            padding: 10px 0;
+            width: 100%;
+        }
+
+        /* 移动端默认：一排3个 */
+        .museum-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        /* PC端 (宽度大于800px)：一排2个 */
+        @media (min-width: 800px) {
+            .museum-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        /* === 卡片样式 (适配 ST 主题) === */
+        .museum-item {
+            background-color: var(--SmartThemeBgColor);
+            border: 1px solid var(--SmartThemeBorderColor);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+        .museum-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border-color: var(--SmartThemeQuoteColor);
+        }
+
+        .museum-thumb-container {
+            width: 100%;
+            aspect-ratio: 2/3; /* 竖向卡片比例 */
+            position: relative;
+            background-color: rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .museum-preview-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .museum-type-tag {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            backdrop-filter: blur(2px);
+        }
+
+        .museum-info {
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            flex-grow: 1;
+        }
+
+        .museum-title {
+            font-size: 0.9em;
+            font-weight: bold;
+            color: var(--SmartThemeBodyColor);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 导入按钮 */
+        .museum-action-btn {
+            background-color: var(--SmartThemeQuoteColor);
+            color: var(--SmartThemeBodyColor); /* 使用主题文字色，或者强制黑色/白色 */
+            text-align: center;
+            padding: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            margin-top: auto; /* 推到底部 */
+            transition: opacity 0.2s;
+        }
+        .museum-action-btn:hover {
+            opacity: 0.8;
+        }
+
+        /* 颜色选择圆点 */
+        .museum-color-dots {
+            display: flex;
+            gap: 4px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+        }
+        .color-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.3);
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        /* 筛选条 */
+        .museum-filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            overflow-x: auto;
+            padding-bottom: 5px;
+        }
+        .museum-filter-btn {
+            padding: 4px 12px;
+            border-radius: 15px;
+            background: rgba(128,128,128,0.1);
+            border: 1px solid var(--SmartThemeBorderColor);
+            color: var(--SmartThemeBodyColor);
+            font-size: 0.85em;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .museum-filter-btn.active {
+            background: var(--SmartThemeQuoteColor);
+            border-color: var(--SmartThemeQuoteColor);
+            color: var(--SmartThemeBodyColor); 
+        }
+
+        /* 配置面板 */
+        .museum-auth-box {
+            background: rgba(0,0,0,0.1);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border: 1px solid var(--SmartThemeBorderColor);
+        }
+
+        .museum-spinner {
+            text-align: center;
+            padding: 20px;
+            color: var(--SmartThemeBodyColor);
+        }
+
+        /* === 弹窗样式重写 (适配主题) === */
+        .museum-modal-overlay { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: rgba(0,0,0,0.85); 
+            backdrop-filter: blur(5px); 
+            z-index: 99999; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            padding: 0;
+        }
+
+        /* 弹窗内容容器：应用主题色 */
+        .museum-modal-content {
+            background: var(--SmartThemeBgColor);
+            color: var(--SmartThemeBodyColor);
+            padding: 0;
+            border-radius: 12px;
+            width: 95%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid var(--SmartThemeBorderColor);
+            overflow: hidden;
+            max-height: 85vh; 
+        }
+
+        /* 头部 */
+        .museum-modal-header {
+            padding: 15px;
+            background: rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--SmartThemeBorderColor);
+            flex-shrink: 0;
+        }
+
+        .museum-modal-title { font-weight: bold; font-size: 1.1em; color: var(--SmartThemeBodyColor); }
+        .museum-modal-close-icon { background: none; border: none; color: var(--SmartThemeBodyColor); font-size: 1.5em; cursor: pointer; opacity: 0.7; padding: 0 10px;}
+        .museum-modal-close-icon:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
+
+        /* 内容区域 */
+        .museum-modal-body {
+            padding: 20px;
+            overflow-y: auto; 
+            -webkit-overflow-scrolling: touch; 
+            flex-grow: 1;
+            /* 滚动条配色修正 */
+            scrollbar-color: var(--SmartThemeQuoteColor) transparent; 
+        }
+        
+        /* 角色布局 */
+        .museum-role-layout {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        /* 移动端弹窗适配 */
+        @media (max-width: 768px) {
+            .museum-role-layout {
+                flex-direction: column;
+                align-items: center;
+            }
+            .museum-role-img-container {
+                width: 140px;
+                margin: 0 auto;
+            }
+        }
+
+        .museum-role-img {
+            width: 100%;
+            border-radius: 8px;
+            aspect-ratio: 2/3;
+            object-fit: cover;
+            border: 1px solid var(--SmartThemeBorderColor);
+            display: block;
+        }
+
+        .museum-role-desc { 
+            background: rgba(0,0,0,0.1); 
+            padding: 12px; 
+            border-radius: 8px; 
+            font-size: 0.9em; 
+            line-height: 1.5; 
+            max-height: 180px; 
+            overflow-y: auto; 
+            white-space: pre-wrap;
+            border-left: 3px solid var(--SmartThemeQuoteColor);
+            color: var(--SmartThemeBodyColor);
+        }
+
+        /* 时间轴 */
+        .museum-timeline {
+            position: relative;
+            padding-left: 20px;
+            margin-top: 10px;
+        }
+        .museum-timeline::before {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 5px;
+            bottom: 5px;
+            width: 2px;
+            background: var(--SmartThemeBorderColor);
+        }
+        .museum-timeline-item {
+            position: relative;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--SmartThemeBorderColor);
+        }
+        .museum-timeline-item:last-child { border: none; }
+        .museum-timeline-dot {
+            position: absolute;
+            left: -17px;
+            top: 5px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--SmartThemeQuoteColor);
+            box-shadow: 0 0 0 3px var(--SmartThemeBgColor);
+        }
+        .museum-timeline-item.latest .museum-timeline-dot {
+            background: #4caf50;
+        }
+        
+        .museum-btn-sm {
+            padding: 4px 10px;
+            font-size: 0.8em;
+            border-radius: 4px;
+            border: 1px solid var(--SmartThemeBorderColor);
+            background: transparent;
+            color: var(--SmartThemeBodyColor);
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .museum-btn-sm:hover {
+            background: var(--SmartThemeQuoteColor);
+            color: var(--SmartThemeBodyColor);
+            border-color: var(--SmartThemeQuoteColor);
+        }
+        
+        /* 强制覆盖导入按钮文字颜色，确保在深色/浅色模式下都可见 */
+        .import-btn, .museum-btn-sm {
+             text-shadow: none;
+        }
+    `;
+    $('head').append(`<style id="museum-extension-styles">${css}</style>`);
+}
+
 // --- Supabase 逻辑 ---
 async function loadSupabase() {
     if (window.supabase) return;
@@ -237,7 +552,7 @@ function renderItems(items) {
 
         if (item.type === 'beautify') {
             $card.find('.color-dot').on('click', function(e) {
-                e.stopPropagation();
+                e.stopPropagation(); // 阻止冒泡
                 const $this = $(this);
                 const idx = $this.data('idx');
                 const selectedVar = variations[idx];
@@ -258,7 +573,12 @@ function renderItems(items) {
             });
         }
 
-        $card.find('.import-btn').on('click', () => handleImport(item, $card));
+        // 绑定导入按钮事件
+        $card.find('.import-btn').on('click', function(e) {
+            e.stopPropagation(); // 核心：阻止冒泡，防止触发 ST 界面关闭
+            handleImport(item, $card);
+        });
+        
         grid.append($card);
     });
 }
@@ -267,7 +587,6 @@ function renderItems(items) {
 
 async function handleImport(item, $card) {
     if (item.type === 'role_card') {
-        // 调用我们新写的角色卡导入逻辑
         await importRoleCard(item);
     } else if (item.type === 'beautify') {
         await importBeautifyDirectly(item, $card);
@@ -277,224 +596,7 @@ async function handleImport(item, $card) {
 // === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
 
 async function importRoleCard(item) {
-    // 1. 注入 CSS 样式（包含强力移动端适配）
-    if (!$('#museum-role-styles').length) {
-        $('head').append(`
-            <style id="museum-role-styles">
-                /* 遮罩层：最高层级，居中对齐 */
-                .museum-modal-overlay { 
-                    position: fixed; 
-                    top: 0; 
-                    left: 0; 
-                    width: 100%; 
-                    height: 100%; 
-                    background: rgba(0,0,0,0.85); 
-                    backdrop-filter: blur(5px); 
-                    z-index: 99999; 
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: center;
-                    padding: 0;
-                }
-
-                /* 弹窗容器 */
-                .museum-modal-content {
-                    background: var(--SmartThemeBgColor, #1a1b26);
-                    color: var(--SmartThemeBodyColor, #fff);
-                    padding: 0;
-                    border-radius: 12px;
-                    width: 100%;
-                    max-width: 600px;
-                    display: flex;
-                    flex-direction: column;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                    border: 1px solid var(--SmartThemeBorderColor, #333);
-                    overflow: hidden;
-                    /* 默认 PC 高度适应 */
-                    max-height: 85vh; 
-                }
-
-                /* 顶部标题栏 */
-                .museum-modal-header {
-                    padding: 15px;
-                    background: rgba(0,0,0,0.2);
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
-                    flex-shrink: 0;
-                }
-
-                .museum-modal-title { font-weight: bold; font-size: 1.1em; }
-                .museum-modal-close-icon { background: none; border: none; color: inherit; font-size: 1.5em; cursor: pointer; opacity: 0.7; padding: 0 10px;}
-
-                /* 内容区域：可滚动 */
-                .museum-modal-body {
-                    padding: 20px;
-                    overflow-y: auto; /* 核心：让内部滚动 */
-                    -webkit-overflow-scrolling: touch; 
-                    flex-grow: 1;
-                }
-
-                /* 角色布局容器 */
-                .museum-role-layout {
-                    display: flex;
-                    gap: 20px;
-                    margin-bottom: 20px;
-                }
-
-                /* 左侧图片容器 */
-                .museum-role-img-container {
-                    flex-shrink: 0;
-                    width: 140px;
-                }
-
-                .museum-role-img {
-                    width: 100%;
-                    border-radius: 8px;
-                    aspect-ratio: 2/3;
-                    object-fit: cover;
-                    border: 1px solid var(--SmartThemeBorderColor, #333);
-                    display: block;
-                }
-
-                /* 右侧描述容器 */
-                .museum-role-info {
-                    flex-grow: 1;
-                    display: flex;
-                    flex-direction: column;
-                    min-width: 0;
-                }
-
-                .museum-role-desc { 
-                    background: rgba(0,0,0,0.2); 
-                    padding: 12px; 
-                    border-radius: 8px; 
-                    font-size: 0.9em; 
-                    line-height: 1.5; 
-                    max-height: 180px; 
-                    overflow-y: auto; 
-                    white-space: pre-wrap;
-                    border-left: 3px solid var(--SmartThemeQuoteColor, #9abdf5);
-                }
-
-                /* 时间轴样式 */
-                .museum-timeline {
-                    position: relative;
-                    padding-left: 20px;
-                }
-                .museum-timeline::before {
-                    content: '';
-                    position: absolute;
-                    left: 7px;
-                    top: 5px;
-                    bottom: 5px;
-                    width: 2px;
-                    background: rgba(255,255,255,0.1);
-                }
-                .museum-timeline-item {
-                    position: relative;
-                    margin-bottom: 15px;
-                    padding-bottom: 15px;
-                    border-bottom: 1px solid rgba(255,255,255,0.05);
-                }
-                .museum-timeline-item:last-child { border: none; }
-                .museum-timeline-dot {
-                    position: absolute;
-                    left: -17px;
-                    top: 5px;
-                    width: 8px;
-                    height: 8px;
-                    border-radius: 50%;
-                    background: var(--SmartThemeQuoteColor, #9abdf5);
-                    box-shadow: 0 0 0 3px rgba(0,0,0,0.3);
-                }
-                .museum-timeline-item.latest .museum-timeline-dot {
-                    background: #4caf50;
-                }
-                .museum-version-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 5px;
-                    flex-wrap: wrap; 
-                    gap: 5px;
-                }
-                .museum-version-date { font-weight: bold; font-size: 0.9em; }
-                .museum-version-note { font-size: 0.85em; opacity: 0.7; margin-bottom: 8px; font-style: italic;}
-                
-                .museum-btn-sm {
-                    padding: 4px 10px;
-                    font-size: 0.8em;
-                    border-radius: 4px;
-                    border: 1px solid var(--SmartThemeBorderColor, #555);
-                    background: transparent;
-                    color: var(--SmartThemeBodyColor, #fff);
-                    cursor: pointer;
-                    transition: all 0.2s;
-                    white-space: nowrap;
-                }
-                .museum-btn-sm:hover {
-                    background: var(--SmartThemeQuoteColor, #9abdf5);
-                    color: #000;
-                    border-color: var(--SmartThemeQuoteColor, #9abdf5);
-                }
-
-                /* === 移动端强力适配 (修正版) === */
-                @media (max-width: 768px) {
-                    .museum-modal-overlay {
-                       align-items: center; /* 确保Flex尝试居中 */
-                       padding: 10px;
-                    }
-
-                    .museum-modal-content {
-                        width: 95%;         
-                        max-height: 80vh;   /* 【核心修改】降低高度，从85降到80，留出更多空间 */
-                        margin: 0 auto;     /* 水平居中 */
-                        margin-top: 5vh;    /* 【核心修改】强制给一个顶部偏移量，视觉上往下移 */
-                    }
-                    
-                    .museum-role-layout {
-                        flex-direction: column;
-                        gap: 15px;
-                        margin-bottom: 15px;
-                        align-items: center; 
-                    }
-
-                    /* 图片容器：调整大小并防止被压缩 */
-                    .museum-role-img-container {
-                        width: 180px;       /* 图片宽度 */
-                        height: 270px;      /* 强制高度 */
-                        flex-shrink: 0;     /* 禁止被 Flex 压缩 */
-                        margin: 0 auto;
-                        background: rgba(0,0,0,0.2); 
-                        border-radius: 8px;
-                    }
-
-                    .museum-role-img {
-                        width: 100%;
-                        height: 100%;
-                        object-fit: contain; /* 保持比例 */
-                    }
-
-                    .museum-role-info {
-                        width: 100%;
-                    }
-
-                    .museum-role-desc {
-                        max-height: 120px; 
-                        font-size: 0.9em;
-                        padding: 10px;
-                    }
-                    
-                    /* 稍微缩小时间轴字体 */
-                    .museum-timeline {
-                        font-size: 0.9em;
-                    }
-                }
-            </style>
-        `);
-    }
+    // 注入 CSS (已在 init 时统一注入)
 
     // 2. 解析数据
     let data;
@@ -547,6 +649,7 @@ async function importRoleCard(item) {
     });
 
     // 4. 构建弹窗 HTML
+    // 注意：.museum-modal-content 已经配置了跟随主题颜色
     const modalHtml = `
     <div id="museum-role-modal" class="museum-modal-overlay">
         <div class="museum-modal-content">
@@ -568,7 +671,7 @@ async function importRoleCard(item) {
                     </div>
                 </div>
 
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid var(--SmartThemeBorderColor); padding-top:10px;">
                     版本历史:
                 </div>
                 
@@ -586,17 +689,31 @@ async function importRoleCard(item) {
 
     // 6. 绑定关闭事件
     const closeModal = () => $('#museum-role-modal').remove();
-    $('#museum-role-close').on('click', closeModal);
+    
+    // 关键修正：关闭按钮阻止冒泡
+    $('#museum-role-close').on('click', function(e) {
+        e.stopPropagation();
+        closeModal();
+    });
     
     // 点击遮罩层关闭
     $('.museum-modal-overlay').on('click', function(e) {
+        // 如果点击的是背景遮罩层（非内容区），才关闭，并阻止冒泡
         if ($(e.target).hasClass('museum-modal-overlay')) {
+            e.stopPropagation();
             closeModal();
         }
     });
+    
+    // 防止点击内容区域关闭抽屉 (虽然挂载在body通常不会，但为了保险)
+    $('.museum-modal-content').on('click', function(e) {
+        e.stopPropagation();
+    });
 
     // 7. 绑定“导入”按钮点击事件
-    $('.import-role-btn').on('click', async function() {
+    $('.import-role-btn').on('click', async function(e) {
+        e.stopPropagation(); // 核心：阻止冒泡
+        
         const url = $(this).data('url');
         const name = $(this).data('name');
         const btn = $(this);
@@ -764,6 +881,9 @@ function initializePlugin() {
     const secondaryContainer = document.getElementById('extensions_settings2');
     
     if (document.getElementById(EXTENSION_ID)) return;
+
+    // 注入 CSS 样式（核心修改位置）
+    injectStyles();
 
     const html = createSettingsHtml();
     

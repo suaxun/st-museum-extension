@@ -182,13 +182,14 @@ function renderItems(items) {
         let title = "未命名";
         let typeLabel = "未知";
         let imgUrl = "";
+        let variations = [];
         
         if (item.type === 'role_card') {
             typeLabel = "角色";
             try {
                 if (item.content.startsWith('{')) {
                     const json = JSON.parse(item.content);
-                    title = json.name;
+                    title = json.name || "未命名";
                 } else {
                     title = item.content;
                 }
@@ -200,23 +201,43 @@ function renderItems(items) {
             try {
                 const json = JSON.parse(item.content);
                 title = json.title || "主题";
-                if (json.variations && json.variations[0]) {
-                    imgUrl = json.variations[0].preview;
+                variations = json.variations || [];
+                if (variations.length > 0) {
+                    imgUrl = variations[0].preview || item.file_url;
                 }
             } catch (e) { }
         }
 
-        const cardHtml = `
-            <div class="museum-item" data-id="${item.id}">
-                <div style="width:100%; aspect-ratio:2/3; background:#222; overflow:hidden; display:flex; align-items:center; justify-content:center;">
-                    <img src="${imgUrl}" style="width:100%; height:100%; object-fit:cover; transition: transform 0.3s;" loading="lazy">
-                </div>
-                <div class="museum-info">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span class="museum-type-tag">${typeLabel}</span>
+        // 构建颜色小圆点的 HTML (仅限美化类型且有多个变体)
+        let colorDotsHtml = '';
+        if (item.type === 'beautify' && variations.length > 0) {
+            colorDotsHtml = '<div class="museum-color-dots" style="display:flex; gap:6px; margin: 8px 0; flex-wrap: wrap;">';
+            variations.forEach((v, idx) => {
+                const activeClass = idx === 0 ? 'box-shadow: 0 0 0 2px var(--SmartThemeBodyColor, #fff), 0 0 0 4px var(--SmartThemeQuoteColor, #000); transform: scale(1.1);' : '';
+                colorDotsHtml += `
+                    <div class="color-dot" data-idx="${idx}" title="${v.name || '样式'}" 
+                         style="width: 14px; height: 14px; border-radius: 50%; background-color: ${v.color || '#ccc'}; cursor: pointer; transition: all 0.2s; border: 1px solid rgba(128,128,128,0.5); ${activeClass}">
                     </div>
-                    <div class="museum-title" title="${title}">${title}</div>
-                    <div class="museum-action-btn import-btn">
+                `;
+            });
+            colorDotsHtml += '</div>';
+        }
+
+        const cardHtml = `
+            <div class="museum-item" data-id="${item.id}" style="border: 1px solid var(--SmartThemeBorderColor, #444); border-radius: 8px; overflow: hidden; background: var(--SmartThemeBgColor, #1a1b26);">
+                <div style="width:100%; aspect-ratio:9/16; max-height: 250px; background:#111; overflow:hidden; display:flex; align-items:center; justify-content:center; position: relative;">
+                    <img class="museum-preview-img" src="${imgUrl}" style="width:100%; height:100%; object-fit:cover; transition: opacity 0.3s;" loading="lazy">
+                    <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.6); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7em;">${typeLabel}</div>
+                </div>
+                <div class="museum-info" style="padding: 12px;">
+                    <div class="museum-title" title="${title}" style="font-weight: bold; font-size: 1.1em; margin-bottom: 5px; color: var(--SmartThemeBodyColor, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</div>
+                    
+                    ${colorDotsHtml}
+
+                    <!-- 隐藏的数据存储器，用于记录当前选中的样式索引 -->
+                    <div class="museum-selected-idx" data-idx="0" style="display:none;"></div>
+
+                    <div class="museum-action-btn import-btn" style="margin-top: 10px; background: var(--SmartThemeQuoteColor, #9abdf5); color: #000; padding: 6px; text-align: center; border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: bold;">
                         <i class="fa-solid fa-download"></i> 导入
                     </div>
                 </div>
@@ -224,19 +245,129 @@ function renderItems(items) {
         `;
         
         const $card = $(cardHtml);
-        $card.find('.import-btn').on('click', () => handleImport(item));
+
+        // 绑定颜色切换事件
+        if (item.type === 'beautify') {
+            $card.find('.color-dot').on('click', function(e) {
+                e.stopPropagation();
+                const $this = $(this);
+                const idx = $this.data('idx');
+                const selectedVar = variations[idx];
+
+                // 更新圆点样式
+                $card.find('.color-dot').css({'box-shadow': 'none', 'transform': 'none'});
+                $this.css({
+                    'box-shadow': '0 0 0 2px var(--SmartThemeBodyColor, #fff), 0 0 0 4px var(--SmartThemeQuoteColor, #000)',
+                    'transform': 'scale(1.1)'
+                });
+
+                // 更新图片
+                if (selectedVar && selectedVar.preview) {
+                    const $img = $card.find('.museum-preview-img');
+                    $img.css('opacity', 0.5);
+                    $img.attr('src', selectedVar.preview);
+                    $img.on('load', () => $img.css('opacity', 1));
+                }
+
+                // 更新隐藏记录器
+                $card.find('.museum-selected-idx').data('idx', idx);
+            });
+        }
+
+        // 绑定导入事件
+        $card.find('.import-btn').on('click', () => handleImport(item, $card));
         grid.append($card);
     });
 }
 
 // --- 导入动作处理 ---
 
-async function handleImport(item) {
+// --- 导入动作处理 ---
+
+async function handleImport(item, $card) {
     if (item.type === 'role_card') {
-        await importRoleCard(item);
+        // 你原有的角色卡导入逻辑
+        if (typeof importRoleCard === 'function') {
+            await importRoleCard(item);
+        } else {
+            toast.warning("角色卡导入函数未定义");
+        }
     } else if (item.type === 'beautify') {
-        // 调用新的美化导入逻辑
-        await importBeautifySmart(item);
+        // 调用新的美化导入逻辑，需传入卡片元素以便知道当前选了哪个颜色
+        await importBeautifyDirectly(item, $card);
+    }
+}
+
+// 直接导入美化 UI 主题
+async function importBeautifyDirectly(item, $card) {
+    const btn = $card.find('.import-btn');
+    const originalText = btn.html();
+    
+    try {
+        // 1. 获取当前选中的索引
+        const selectedIdx = $card.find('.museum-selected-idx').data('idx') || 0;
+        
+        // 2. 解析数据
+        const json = JSON.parse(item.content);
+        const variations = json.variations || [];
+        const selectedVar = variations[selectedIdx];
+
+        if (!selectedVar || !selectedVar.file) {
+            throw new Error("此配色方案没有有效的源文件链接");
+        }
+
+        const themeUrl = selectedVar.file;
+        const themeName = selectedVar.name || json.title || "自定义主题";
+
+        btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 下载中...');
+
+        // 3. 核心：下载这个 .json 文件
+        const response = await fetch(themeUrl);
+        if (!response.ok) throw new Error(`网络请求失败: ${response.status}`);
+        
+        const blob = await response.blob();
+        
+        // 确保下载的是 JSON 文件
+        if (!themeUrl.includes('.json') && blob.type !== 'application/json') {
+             toast.warning("文件类型似乎不是标准的 JSON，尝试强制导入...");
+        }
+
+        // 4. 将 Blob 包装成 File 对象
+        // 生成一个安全的文件名
+        const fileName = `${themeName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}.json`;
+        const file = new File([blob], fileName, { type: "application/json" });
+
+        btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 导入中...');
+
+        // 5. 模拟 SillyTavern 的 UI 主题文件上传机制
+        // ST 原生的文件输入框
+        const stThemeInput = document.getElementById('ui_preset_import_file');
+        
+        if (!stThemeInput) {
+            throw new Error("找不到 SillyTavern 的主题导入组件 (#ui_preset_import_file)");
+        }
+
+        // 利用 DataTransfer 将 File 对象塞进 <input type="file"> 中
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        stThemeInput.files = dataTransfer.files;
+
+        // 触发 change 事件，SillyTavern 原生代码会监听此事件并解析应用主题
+        const changeEvent = new Event('change', { bubbles: true });
+        stThemeInput.dispatchEvent(changeEvent);
+
+        toast.success(`主题 "${themeName}" 已成功导入！`);
+        
+        // 提示用户可能需要手动在下拉列表中选中（ST导入后往往会自动选中并刷新UI）
+        setTimeout(() => {
+            btn.html('<i class="fa-solid fa-check"></i> 成功');
+            setTimeout(() => btn.html(originalText), 2000);
+        }, 500);
+
+    } catch (e) {
+        console.error(e);
+        toast.error("主题导入失败: " + e.message);
+        btn.html(originalText);
     }
 }
 

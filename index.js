@@ -47,6 +47,7 @@ const toast = {
 async function loadSupabase() {
     if (window.supabase) return;
     
+    // 备选 CDN 列表
     const sources = [
         "https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js",
         "https://cdnjs.cloudflare.com/ajax/libs/supabase.js/2.39.7/supabase.min.js",
@@ -276,27 +277,88 @@ async function handleImport(item, $card) {
 // === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
 
 async function importRoleCard(item) {
-    // 1. 注入 CSS 样式（如果还没注入）
+    // 1. 注入 CSS 样式（包含移动端适配）
     if (!$('#museum-role-styles').length) {
         $('head').append(`
             <style id="museum-role-styles">
+                /* 通用样式 */
+                .museum-modal-content {
+                    background: var(--SmartThemeBgColor, #1a1b26);
+                    color: var(--SmartThemeBodyColor, #fff);
+                    padding: 0; /* 移除内边距，交给内部容器管理 */
+                    border-radius: 12px;
+                    width: 90%;
+                    max-width: 600px;
+                    max-height: 90vh; /* 限制最大高度，防止超出一屏 */
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+                    border: 1px solid var(--SmartThemeBorderColor, #333);
+                    display: flex;
+                    flex-direction: column; /* 弹性垂直布局 */
+                    overflow: hidden; /* 防止圆角溢出 */
+                }
+
+                .museum-modal-header {
+                    padding: 15px;
+                    background: rgba(0,0,0,0.2);
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+                    flex-shrink: 0; /* 头部不压缩 */
+                }
+
+                .museum-modal-body {
+                    padding: 20px;
+                    overflow-y: auto; /* 只有内容区域滚动 */
+                    flex-grow: 1; /* 占据剩余空间 */
+                }
+
+                /* 角色布局容器 */
+                .museum-role-layout {
+                    display: flex;
+                    gap: 20px;
+                    margin-bottom: 20px;
+                }
+
+                /* 左侧图片容器 */
+                .museum-role-img-container {
+                    flex-shrink: 0;
+                    width: 140px;
+                }
+
+                .museum-role-img {
+                    width: 100%;
+                    border-radius: 8px;
+                    aspect-ratio: 2/3;
+                    object-fit: cover;
+                    border: 1px solid var(--SmartThemeBorderColor, #333);
+                }
+
+                /* 右侧描述容器 */
+                .museum-role-info {
+                    flex-grow: 1;
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0; /* 防止文本撑开 flex */
+                }
+
                 .museum-role-desc { 
                     background: rgba(0,0,0,0.2); 
-                    padding: 15px; 
+                    padding: 12px; 
                     border-radius: 8px; 
                     font-size: 0.9em; 
                     line-height: 1.5; 
-                    margin-bottom: 20px; 
-                    max-height: 150px; 
+                    max-height: 180px; 
                     overflow-y: auto; 
                     white-space: pre-wrap;
                     border-left: 3px solid var(--SmartThemeQuoteColor, #9abdf5);
                 }
+
+                /* 时间轴样式 */
                 .museum-timeline {
                     position: relative;
                     padding-left: 20px;
-                    max-height: 300px;
-                    overflow-y: auto;
+                    /* max-height 移除，交给外层 flex 容器滚动 */
                 }
                 .museum-timeline::before {
                     content: '';
@@ -332,9 +394,12 @@ async function importRoleCard(item) {
                     justify-content: space-between;
                     align-items: center;
                     margin-bottom: 5px;
+                    flex-wrap: wrap; /* 允许小屏幕换行 */
+                    gap: 5px;
                 }
                 .museum-version-date { font-weight: bold; font-size: 0.9em; }
                 .museum-version-note { font-size: 0.85em; opacity: 0.7; margin-bottom: 8px; font-style: italic;}
+                
                 .museum-btn-sm {
                     padding: 4px 10px;
                     font-size: 0.8em;
@@ -344,11 +409,46 @@ async function importRoleCard(item) {
                     color: var(--SmartThemeBodyColor, #fff);
                     cursor: pointer;
                     transition: all 0.2s;
+                    white-space: nowrap;
                 }
                 .museum-btn-sm:hover {
                     background: var(--SmartThemeQuoteColor, #9abdf5);
                     color: #000;
                     border-color: var(--SmartThemeQuoteColor, #9abdf5);
+                }
+
+                /* === 移动端适配 (核心修改) === */
+                @media (max-width: 768px) {
+                    .museum-modal-content {
+                        width: 95%; /* 手机上更宽一点 */
+                        max-height: 85vh; /* 留出浏览器工具栏空间 */
+                    }
+                    
+                    /* 布局改为上下结构 */
+                    .museum-role-layout {
+                        flex-direction: column;
+                        gap: 15px;
+                    }
+
+                    /* 图片变成横幅样式，节省垂直空间 */
+                    .museum-role-img-container {
+                        width: 100%;
+                        height: 120px; /* 固定高度 */
+                        overflow: hidden;
+                        border-radius: 8px;
+                    }
+
+                    .museum-role-img {
+                        width: 100%;
+                        height: 100%;
+                        aspect-ratio: auto;
+                        object-fit: cover;
+                        object-position: top center; /* 聚焦头部 */
+                    }
+
+                    .museum-role-desc {
+                        max-height: 120px; /* 稍微减小描述高度，给时间轴留空间 */
+                    }
                 }
             </style>
         `);
@@ -362,7 +462,7 @@ async function importRoleCard(item) {
         data = { name: item.content, description: "暂无介绍", history: [] };
     }
 
-    // 格式化历史记录（如果没有，就造一个当前版本的）
+    // 格式化历史记录
     let history = data.history || [];
     if (history.length === 0 && item.file_url) {
         history.push({
@@ -384,7 +484,6 @@ async function importRoleCard(item) {
         const label = idx === 0 ? '(最新)' : '';
         const note = ver.note ? ver.note : '无更新说明';
         
-        // 只有有 PNG 链接的才能导入
         const actionBtn = ver.png 
             ? `<button class="museum-btn-sm import-role-btn" data-url="${ver.png}" data-name="${data.name}">
                  <i class="fa-solid fa-download"></i> 导入
@@ -403,33 +502,35 @@ async function importRoleCard(item) {
         `;
     });
 
-    // 4. 构建弹窗 HTML (复用你现有的弹窗样式)
+    // 4. 构建弹窗 HTML (使用 Class 控制布局)
     const modalHtml = `
     <div id="museum-role-modal" class="museum-modal-overlay">
-        <div class="museum-modal-content" style="max-width: 500px;">
+        <div class="museum-modal-content">
             <div class="museum-modal-header">
                 <div class="museum-modal-title"><i class="fa-solid fa-user-tag"></i> ${data.name || '角色详情'}</div>
                 <button class="museum-modal-close-icon" id="museum-role-close">&times;</button>
             </div>
             
-            <div style="display:flex; gap:15px; margin-bottom:15px;">
-                <!-- 左侧：最新封面 -->
-                <div style="flex-shrink:0; width: 100px;">
-                    <img src="${item.file_url}" style="width:100%; border-radius:6px; aspect-ratio: 2/3; object-fit: cover;">
+            <div class="museum-modal-body custom-scroll">
+                <div class="museum-role-layout">
+                    <!-- 图片容器 -->
+                    <div class="museum-role-img-container">
+                        <img src="${item.file_url}" class="museum-role-img">
+                    </div>
+                    <!-- 描述容器 -->
+                    <div class="museum-role-info">
+                        <div style="font-size:0.8em; opacity:0.7; margin-bottom:5px;">角色介绍:</div>
+                        <div class="museum-role-desc custom-scroll">${data.description || '暂无介绍'}</div>
+                    </div>
                 </div>
-                <!-- 右侧：描述 -->
-                <div style="flex-grow:1; display:flex; flex-direction:column;">
-                    <div style="font-size:0.8em; opacity:0.7; margin-bottom:5px;">角色介绍:</div>
-                    <div class="museum-role-desc custom-scroll">${data.description || '暂无介绍'}</div>
-                </div>
-            </div>
 
-            <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
-                版本历史:
-            </div>
-            
-            <div class="museum-timeline custom-scroll">
-                ${timelineHtml}
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                    版本历史:
+                </div>
+                
+                <div class="museum-timeline">
+                    ${timelineHtml}
+                </div>
             </div>
         </div>
     </div>
@@ -455,7 +556,6 @@ async function importRoleCard(item) {
 
         btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
         
-        // 调用执行导入的函数
         await performCharacterImport(url, name);
         
         btn.html('<i class="fa-solid fa-check"></i>');
@@ -477,12 +577,11 @@ async function performCharacterImport(url, charName) {
         let ext = 'png';
         if (blob.type.includes('json') || url.endsWith('.json')) ext = 'json';
         
-        // 文件名处理，防止非法字符
         const cleanName = (charName || 'character').replace(/[^a-zA-Z0-9\u4e00-\u9fa5-_]/g, '_');
         const filename = `${cleanName}.${ext}`;
         const file = new File([blob], filename, { type: blob.type });
 
-        // 3. 寻找 SillyTavern 的导入输入框 (character_import_button 对应的 input)
+        // 3. 寻找 SillyTavern 的导入输入框
         const stImportInput = document.getElementById('character_import_file');
         
         if (!stImportInput) {
@@ -494,7 +593,7 @@ async function performCharacterImport(url, charName) {
         dataTransfer.items.add(file);
         stImportInput.files = dataTransfer.files;
 
-        // 5. 触发 change 事件，让 ST 接管后续逻辑
+        // 5. 触发 change 事件
         const changeEvent = new Event('change', { bubbles: true });
         stImportInput.dispatchEvent(changeEvent);
 

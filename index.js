@@ -14,13 +14,12 @@ const getContext = () => {
     return window.SillyTavern && window.SillyTavern.getContext ? window.SillyTavern.getContext() : null;
 }
 
-// 获取扩展设置（安全版）
+// 获取扩展设置
 function getExtensionSettings() {
     const context = getContext();
     if (context && context.extensionSettings) {
         return context.extensionSettings;
     }
-    // 回退兼容
     if (window.extension_settings) {
         return window.extension_settings;
     }
@@ -43,52 +42,51 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- 样式注入 (核心修改：配色适配 & 布局调整) ---
+// --- 样式注入 ---
 function injectStyles() {
     if ($('#museum-extension-styles').length) return;
 
     const css = `
-        /* === 博物馆主界面网格布局 === */
+        /* === 网格布局 (PC 2列 / 移动端 3列) === */
         .museum-grid {
             display: grid;
             gap: 10px;
             padding: 10px 0;
             width: 100%;
-        }
-
-        /* 移动端默认：一排3个 */
-        .museum-grid {
+            /* 移动端默认 3 列 */
             grid-template-columns: repeat(3, 1fr);
         }
 
-        /* PC端 (宽度大于800px)：一排2个 */
         @media (min-width: 800px) {
             .museum-grid {
+                /* PC端 2 列 */
                 grid-template-columns: repeat(2, 1fr);
             }
         }
 
-        /* === 卡片样式 (适配 ST 主题) === */
+        /* === 卡片基础样式 === */
         .museum-item {
             background-color: var(--SmartThemeBgColor);
             border: 1px solid var(--SmartThemeBorderColor);
             border-radius: 8px;
             overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative; /* 用于绝对定位内部覆盖层 */
             display: flex;
             flex-direction: column;
+            transition: border-color 0.2s;
+            height: 320px; /* 固定高度，确保对齐 */
         }
         .museum-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             border-color: var(--SmartThemeQuoteColor);
         }
 
+        /* 顶部图片容器 */
         .museum-thumb-container {
             width: 100%;
-            aspect-ratio: 2/3; /* 竖向卡片比例 */
-            position: relative;
+            height: 200px; /* 固定图片高度 */
+            flex-shrink: 0;
             background-color: rgba(0,0,0,0.1);
+            position: relative;
             overflow: hidden;
         }
 
@@ -96,7 +94,11 @@ function injectStyles() {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            display: block;
+            object-position: top;
+            transition: transform 0.5s;
+        }
+        .museum-item:hover .museum-preview-img {
+            transform: scale(1.05);
         }
 
         .museum-type-tag {
@@ -109,18 +111,23 @@ function injectStyles() {
             padding: 2px 6px;
             border-radius: 4px;
             backdrop-filter: blur(2px);
+            z-index: 2;
         }
 
+        /* 底部信息区 */
         .museum-info {
-            padding: 8px;
+            padding: 10px;
             display: flex;
             flex-direction: column;
-            gap: 5px;
             flex-grow: 1;
+            justify-content: space-between;
+            gap: 5px;
+            background-color: var(--SmartThemeBgColor);
+            z-index: 2;
         }
 
         .museum-title {
-            font-size: 0.9em;
+            font-size: 0.95em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
             white-space: nowrap;
@@ -128,290 +135,197 @@ function injectStyles() {
             text-overflow: ellipsis;
         }
 
-        /* 导入按钮 */
+        /* 按钮组 */
+        .museum-btn-group {
+            display: flex;
+            gap: 5px;
+            margin-top: auto;
+        }
+
         .museum-action-btn {
             background-color: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor); /* 使用主题文字色，或者强制黑色/白色 */
+            color: var(--SmartThemeBodyColor);
             text-align: center;
-            padding: 5px;
+            padding: 6px 0;
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.85em;
-            margin-top: auto; /* 推到底部 */
+            flex: 1;
             transition: opacity 0.2s;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
         }
         .museum-action-btn:hover {
             opacity: 0.8;
         }
+        .museum-action-btn.secondary {
+            background-color: transparent;
+            border: 1px solid var(--SmartThemeBorderColor);
+            color: var(--SmartThemeBodyColor);
+            flex: 0 0 30px; /* 小按钮 */
+        }
+        .museum-action-btn.secondary:hover {
+            border-color: var(--SmartThemeQuoteColor);
+            color: var(--SmartThemeQuoteColor);
+        }
 
-        /* 颜色选择圆点 */
+        /* === 内部覆盖层 (详情/历史) === */
+        .museum-card-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--SmartThemeBgColor);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        .museum-card-overlay.active {
+            transform: translateY(0);
+        }
+
+        /* 覆盖层头部 */
+        .museum-overlay-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--SmartThemeBorderColor);
+            margin-bottom: 8px;
+            flex-shrink: 0;
+        }
+        .museum-overlay-title {
+            font-size: 0.9em;
+            font-weight: bold;
+            color: var(--SmartThemeBodyColor);
+        }
+        .museum-overlay-close {
+            cursor: pointer;
+            padding: 4px;
+            opacity: 0.6;
+        }
+        .museum-overlay-close:hover { opacity: 1; }
+
+        /* 覆盖层内容滚动区 */
+        .museum-overlay-body {
+            flex-grow: 1;
+            overflow-y: auto;
+            font-size: 0.85em;
+            color: var(--SmartThemeBodyColor);
+            scrollbar-width: thin;
+            scrollbar-color: var(--SmartThemeQuoteColor) transparent;
+        }
+        .museum-overlay-body::-webkit-scrollbar { width: 4px; }
+        .museum-overlay-body::-webkit-scrollbar-thumb { background: var(--SmartThemeQuoteColor); border-radius: 2px; }
+
+        /* 角色简介 */
+        .museum-role-desc {
+            margin-bottom: 15px;
+            line-height: 1.4;
+            opacity: 0.9;
+            white-space: pre-wrap;
+        }
+
+        /* 迷你时间轴列表 */
+        .museum-mini-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .museum-version-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px;
+            background: rgba(0,0,0,0.05);
+            border-radius: 4px;
+            border: 1px solid var(--SmartThemeBorderColor);
+        }
+        .museum-version-info {
+            display: flex;
+            flex-direction: column;
+        }
+        .museum-v-date { font-weight: bold; font-size: 0.9em; }
+        .museum-v-note { font-size: 0.8em; opacity: 0.7; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        .museum-v-btn {
+            font-size: 0.8em;
+            padding: 3px 8px;
+            background: transparent;
+            border: 1px solid var(--SmartThemeBorderColor);
+            color: var(--SmartThemeBodyColor);
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .museum-v-btn:hover {
+            background: var(--SmartThemeQuoteColor);
+            border-color: var(--SmartThemeQuoteColor);
+            color: #000;
+        }
+
+        /* 美化颜色点 */
         .museum-color-dots {
             display: flex;
             gap: 4px;
             overflow-x: auto;
-            padding-bottom: 2px;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
         }
         .color-dot {
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             border: 1px solid rgba(255,255,255,0.3);
             cursor: pointer;
             flex-shrink: 0;
         }
-
-        /* 筛选条 */
-        .museum-filter-bar {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
-            overflow-x: auto;
-            padding-bottom: 5px;
-        }
-        .museum-filter-btn {
-            padding: 4px 12px;
-            border-radius: 15px;
-            background: rgba(128,128,128,0.1);
-            border: 1px solid var(--SmartThemeBorderColor);
-            color: var(--SmartThemeBodyColor);
-            font-size: 0.85em;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-        .museum-filter-btn.active {
-            background: var(--SmartThemeQuoteColor);
-            border-color: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor); 
-        }
-
-        /* 配置面板 */
-        .museum-auth-box {
-            background: rgba(0,0,0,0.1);
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            border: 1px solid var(--SmartThemeBorderColor);
-        }
-
-        .museum-spinner {
-            text-align: center;
-            padding: 20px;
-            color: var(--SmartThemeBodyColor);
-        }
-
-        /* === 弹窗样式重写 (适配主题) === */
-        .museum-modal-overlay { 
-            position: fixed; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            background: rgba(0,0,0,0.85); 
-            backdrop-filter: blur(5px); 
-            z-index: 99999; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center;
-            padding: 0;
-        }
-
-        /* 弹窗内容容器：应用主题色 */
-        .museum-modal-content {
-            background: var(--SmartThemeBgColor);
-            color: var(--SmartThemeBodyColor);
-            padding: 0;
-            border-radius: 12px;
-            width: 95%;
-            max-width: 600px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            border: 1px solid var(--SmartThemeBorderColor);
-            overflow: hidden;
-            max-height: 85vh; 
-        }
-
-        /* 头部 */
-        .museum-modal-header {
-            padding: 15px;
-            background: rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--SmartThemeBorderColor);
-            flex-shrink: 0;
-        }
-
-        .museum-modal-title { font-weight: bold; font-size: 1.1em; color: var(--SmartThemeBodyColor); }
-        .museum-modal-close-icon { background: none; border: none; color: var(--SmartThemeBodyColor); font-size: 1.5em; cursor: pointer; opacity: 0.7; padding: 0 10px;}
-        .museum-modal-close-icon:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
-
-        /* 内容区域 */
-        .museum-modal-body {
-            padding: 20px;
-            overflow-y: auto; 
-            -webkit-overflow-scrolling: touch; 
-            flex-grow: 1;
-            /* 滚动条配色修正 */
-            scrollbar-color: var(--SmartThemeQuoteColor) transparent; 
-        }
         
-        /* 角色布局 */
-        .museum-role-layout {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-
-        /* 移动端弹窗适配 */
-        @media (max-width: 768px) {
-            .museum-role-layout {
-                flex-direction: column;
-                align-items: center;
-            }
-            .museum-role-img-container {
-                width: 140px;
-                margin: 0 auto;
-            }
-        }
-
-        .museum-role-img {
-            width: 100%;
-            border-radius: 8px;
-            aspect-ratio: 2/3;
-            object-fit: cover;
-            border: 1px solid var(--SmartThemeBorderColor);
-            display: block;
-        }
-
-        .museum-role-desc { 
-            background: rgba(0,0,0,0.1); 
-            padding: 12px; 
-            border-radius: 8px; 
-            font-size: 0.9em; 
-            line-height: 1.5; 
-            max-height: 180px; 
-            overflow-y: auto; 
-            white-space: pre-wrap;
-            border-left: 3px solid var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor);
-        }
-
-        /* 时间轴 */
-        .museum-timeline {
-            position: relative;
-            padding-left: 20px;
-            margin-top: 10px;
-        }
-        .museum-timeline::before {
-            content: '';
-            position: absolute;
-            left: 7px;
-            top: 5px;
-            bottom: 5px;
-            width: 2px;
-            background: var(--SmartThemeBorderColor);
-        }
-        .museum-timeline-item {
-            position: relative;
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--SmartThemeBorderColor);
-        }
-        .museum-timeline-item:last-child { border: none; }
-        .museum-timeline-dot {
-            position: absolute;
-            left: -17px;
-            top: 5px;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--SmartThemeQuoteColor);
-            box-shadow: 0 0 0 3px var(--SmartThemeBgColor);
-        }
-        .museum-timeline-item.latest .museum-timeline-dot {
-            background: #4caf50;
-        }
-        
-        .museum-btn-sm {
-            padding: 4px 10px;
-            font-size: 0.8em;
-            border-radius: 4px;
-            border: 1px solid var(--SmartThemeBorderColor);
-            background: transparent;
-            color: var(--SmartThemeBodyColor);
-            cursor: pointer;
-            transition: all 0.2s;
-            white-space: nowrap;
-        }
-        .museum-btn-sm:hover {
-            background: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor);
-            border-color: var(--SmartThemeQuoteColor);
-        }
-        
-        /* 强制覆盖导入按钮文字颜色，确保在深色/浅色模式下都可见 */
-        .import-btn, .museum-btn-sm {
-             text-shadow: none;
-        }
+        /* 旋转动画 */
+        .fa-spin { animation: fa-spin 2s infinite linear; }
+        @keyframes fa-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     `;
     $('head').append(`<style id="museum-extension-styles">${css}</style>`);
 }
 
-// --- Supabase 逻辑 ---
+// --- Supabase 逻辑 (保持不变) ---
 async function loadSupabase() {
     if (window.supabase) return;
-    
-    // 备选 CDN 列表
     const sources = [
         "https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js",
         "https://cdnjs.cloudflare.com/ajax/libs/supabase.js/2.39.7/supabase.min.js",
         "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.8/dist/umd/supabase.min.js"
     ];
-
     console.log("[Museum] 正在加载 Supabase SDK...");
-
     const tryLoadScript = (url) => {
         return new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = url;
-            script.onload = () => {
-                console.log(`[Museum] 成功从 ${url} 加载 SDK`);
-                resolve();
-            };
-            script.onerror = () => {
-                console.warn(`[Museum] 无法加载: ${url}`);
-                document.head.removeChild(script); 
-                reject();
-            };
+            script.onload = () => resolve();
+            script.onerror = () => { document.head.removeChild(script); reject(); };
             document.head.appendChild(script);
         });
     };
-
     for (const url of sources) {
-        try {
-            await tryLoadScript(url);
-            return; 
-        } catch (e) {
-            continue;
-        }
+        try { await tryLoadScript(url); return; } catch (e) { continue; }
     }
-
-    const errorMsg = "[Museum] 错误：所有 CDN 源均无法连接，请检查网络代理。";
-    console.error(errorMsg);
     if (window.toastr) window.toastr.error("无法加载 Supabase 组件");
 }
 
 async function initSupabaseClient() {
     const settings = getExtensionSettings()[EXTENSION_NAME];
-    
     if (!settings || !settings.sbUrl || !settings.sbKey) return false;
     if (!window.supabase) await loadSupabase();
-
     try {
         const createClient = window.supabase.createClient || window.supabase.default.createClient;
         supabase = createClient(settings.sbUrl, settings.sbKey);
-        
         const { data } = await supabase.auth.getSession();
         if (data.session) {
             session = data.session;
@@ -477,6 +391,13 @@ async function refreshGallery() {
     }
 }
 
+// 格式化时间辅助函数
+const formatDateShort = (ts) => {
+    if (!ts) return '未知';
+    const d = new Date(ts);
+    return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+};
+
 function renderItems(items) {
     const grid = $('#museum-grid');
     grid.empty();
@@ -487,10 +408,13 @@ function renderItems(items) {
     }
 
     items.forEach(item => {
+        // --- 数据解析 ---
         let title = "未命名";
         let typeLabel = "未知";
         let imgUrl = "";
         let variations = [];
+        let description = "";
+        let history = [];
         
         if (item.type === 'role_card') {
             typeLabel = "角色";
@@ -498,6 +422,17 @@ function renderItems(items) {
                 if (item.content.startsWith('{')) {
                     const json = JSON.parse(item.content);
                     title = json.name || "未命名";
+                    description = json.description || "暂无简介";
+                    history = json.history || [];
+                    
+                    // 如果历史记录为空但有 file_url，构造初始记录
+                    if (history.length === 0 && item.file_url) {
+                        history.push({
+                            date: item.created_at,
+                            png: item.file_url,
+                            note: "初始版本"
+                        });
+                    }
                 } else {
                     title = item.content;
                 }
@@ -516,22 +451,26 @@ function renderItems(items) {
             } catch (e) { }
         }
 
+        // --- 构建 HTML ---
+
+        // 1. 卡片主体
         let colorDotsHtml = '';
         if (item.type === 'beautify' && variations.length > 0) {
             colorDotsHtml = '<div class="museum-color-dots">';
             variations.forEach((v, idx) => {
-                const activeClass = idx === 0 ? 'active' : '';
-                colorDotsHtml += `
-                    <div class="color-dot ${activeClass}" data-idx="${idx}" title="${v.name || '样式'}" 
-                         style="background-color: ${v.color || '#ccc'};">
-                    </div>
-                `;
+                colorDotsHtml += `<div class="color-dot" data-idx="${idx}" title="${v.name}" style="background-color: ${v.color};"></div>`;
             });
             colorDotsHtml += '</div>';
         }
 
+        // 角色卡的“详情”按钮
+        const detailBtn = item.type === 'role_card' 
+            ? `<div class="museum-action-btn secondary toggle-overlay-btn" title="查看详情与历史版本"><i class="fa-solid fa-list"></i></div>` 
+            : '';
+
         const cardHtml = `
             <div class="museum-item" data-id="${item.id}">
+                <!-- 正面内容 -->
                 <div class="museum-thumb-container">
                     <img class="museum-preview-img" src="${imgUrl}" loading="lazy">
                     <div class="museum-type-tag">${typeLabel}</div>
@@ -541,41 +480,90 @@ function renderItems(items) {
                     <div class="museum-title" title="${title}">${title}</div>
                     ${colorDotsHtml}
                     <div class="museum-selected-idx" data-idx="0"></div>
-                    <div class="museum-action-btn import-btn">
-                        <i class="fa-solid fa-download"></i> 导入
+                    
+                    <div class="museum-btn-group">
+                        <div class="museum-action-btn import-btn">
+                            <i class="fa-solid fa-download"></i> 导入最新
+                        </div>
+                        ${detailBtn}
                     </div>
                 </div>
+
+                <!-- 内部覆盖层 (角色卡专用) -->
+                ${item.type === 'role_card' ? `
+                <div class="museum-card-overlay">
+                    <div class="museum-overlay-header">
+                        <span class="museum-overlay-title">详情 & 历史</span>
+                        <div class="museum-overlay-close toggle-overlay-btn"><i class="fa-solid fa-xmark"></i></div>
+                    </div>
+                    <div class="museum-overlay-body">
+                        <div class="museum-role-desc">${description}</div>
+                        <div class="museum-mini-timeline"></div>
+                    </div>
+                </div>` : ''}
             </div>
         `;
         
         const $card = $(cardHtml);
 
+        // --- 事件绑定 ---
+
+        // 1. 美化包颜色切换
         if (item.type === 'beautify') {
             $card.find('.color-dot').on('click', function(e) {
-                e.stopPropagation(); // 阻止冒泡
-                const $this = $(this);
-                const idx = $this.data('idx');
+                e.stopPropagation();
+                const idx = $(this).data('idx');
                 const selectedVar = variations[idx];
-
-                $card.find('.color-dot').css({'box-shadow': 'none', 'transform': 'none'});
-                $this.css({
-                    'box-shadow': '0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor)',
-                    'transform': 'scale(1.1)'
-                });
-
+                $card.find('.color-dot').css({'border-color': 'rgba(255,255,255,0.3)', 'transform': 'scale(1)'});
+                $(this).css({'border-color': 'var(--SmartThemeQuoteColor)', 'transform': 'scale(1.2)'});
+                
                 if (selectedVar && selectedVar.preview) {
-                    const $img = $card.find('.museum-preview-img');
-                    $img.css('opacity', 0.5);
-                    $img.attr('src', selectedVar.preview);
-                    $img.on('load', () => $img.css('opacity', 1));
+                    $card.find('.museum-preview-img').attr('src', selectedVar.preview);
                 }
                 $card.find('.museum-selected-idx').data('idx', idx);
             });
         }
 
-        // 绑定导入按钮事件
+        // 2. 角色卡覆盖层切换
+        if (item.type === 'role_card') {
+            const overlay = $card.find('.museum-card-overlay');
+            const timelineContainer = overlay.find('.museum-mini-timeline');
+
+            // 渲染历史列表
+            history.forEach((ver, idx) => {
+                const isLatest = idx === 0;
+                const rowHtml = `
+                    <div class="museum-version-row">
+                        <div class="museum-version-info">
+                            <span class="museum-v-date">${formatDateShort(ver.date)} ${isLatest ? '<span style="color:#4caf50; font-size:0.8em">NEW</span>' : ''}</span>
+                            <span class="museum-v-note" title="${ver.note || ''}">${ver.note || '无说明'}</span>
+                        </div>
+                        <button class="museum-v-btn history-import-btn" data-url="${ver.png || ver.json}">
+                            导入
+                        </button>
+                    </div>
+                `;
+                timelineContainer.append(rowHtml);
+            });
+
+            // 详情按钮开关
+            $card.find('.toggle-overlay-btn').on('click', function(e) {
+                e.stopPropagation();
+                overlay.toggleClass('active');
+            });
+
+            // 历史记录导入按钮
+            $card.find('.history-import-btn').on('click', function(e) {
+                e.stopPropagation();
+                const url = $(this).data('url');
+                const btn = $(this);
+                handleHistoryImport(url, title, btn);
+            });
+        }
+
+        // 3. 主导入按钮 (导入最新/默认)
         $card.find('.import-btn').on('click', function(e) {
-            e.stopPropagation(); // 核心：阻止冒泡，防止触发 ST 界面关闭
+            e.stopPropagation(); 
             handleImport(item, $card);
         });
         
@@ -583,162 +571,57 @@ function renderItems(items) {
     });
 }
 
-// --- 导入动作处理 ---
+// --- 导入逻辑 ---
 
 async function handleImport(item, $card) {
     if (item.type === 'role_card') {
-        await importRoleCard(item);
+        const btn = $card.find('.import-btn');
+        const originalHtml = btn.html();
+        btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
+        
+        try {
+            // 解析获取最新名字
+            let charName = "character";
+            try {
+                const json = JSON.parse(item.content);
+                if (json.name) charName = json.name;
+            } catch(e) {}
+
+            await performCharacterImport(item.file_url, charName);
+            btn.html('<i class="fa-solid fa-check"></i>');
+        } catch (e) {
+            btn.html('<i class="fa-solid fa-xmark"></i>');
+        }
+        setTimeout(() => btn.html(originalHtml), 2000);
+
     } else if (item.type === 'beautify') {
         await importBeautifyDirectly(item, $card);
     }
 }
 
-// === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
-
-async function importRoleCard(item) {
-    // 注入 CSS (已在 init 时统一注入)
-
-    // 2. 解析数据
-    let data;
+// 历史版本导入
+async function handleHistoryImport(url, charName, $btn) {
+    const originalText = $btn.text();
+    $btn.text('Wait...');
+    
     try {
-        data = JSON.parse(item.content);
+        await performCharacterImport(url, charName);
+        $btn.text('OK');
     } catch (e) {
-        data = { name: item.content, description: "暂无介绍", history: [] };
+        $btn.text('Error');
     }
-
-    // 格式化历史记录
-    let history = data.history || [];
-    if (history.length === 0 && item.file_url) {
-        history.push({
-            date: item.created_at,
-            png: item.file_url,
-            note: "初始版本"
-        });
-    }
-
-    const formatDate = (ts) => {
-        if (!ts) return '未知时间';
-        return new Date(ts).toLocaleString(undefined, {
-            year: 'numeric', month: 'numeric', day: 'numeric'
-        });
-    };
-
-    // 3. 构建时间轴 HTML
-    let timelineHtml = '';
-    history.forEach((ver, idx) => {
-        const isLatest = idx === 0 ? 'latest' : '';
-        const label = idx === 0 ? '<span style="color:#4caf50; font-size:0.8em; margin-left:5px;">(NEW)</span>' : '';
-        const note = ver.note ? ver.note : '无更新说明';
-        
-        const actionBtn = ver.png 
-            ? `<button class="museum-btn-sm import-role-btn" data-url="${ver.png}" data-name="${data.name}">
-                 <i class="fa-solid fa-download"></i> 导入
-               </button>`
-            : `<span style="font-size:0.8em; opacity:0.5;">文件丢失</span>`;
-
-        timelineHtml += `
-            <div class="museum-timeline-item ${isLatest}">
-                <div class="museum-timeline-dot"></div>
-                <div class="museum-version-header">
-                    <div class="museum-version-date">${formatDate(ver.date)} ${label}</div>
-                    ${actionBtn}
-                </div>
-                <div class="museum-version-note">${note}</div>
-            </div>
-        `;
-    });
-
-    // 4. 构建弹窗 HTML
-    // 注意：.museum-modal-content 已经配置了跟随主题颜色
-    const modalHtml = `
-    <div id="museum-role-modal" class="museum-modal-overlay">
-        <div class="museum-modal-content">
-            <div class="museum-modal-header">
-                <div class="museum-modal-title"><i class="fa-solid fa-user-tag"></i> ${data.name || '角色详情'}</div>
-                <button class="museum-modal-close-icon" id="museum-role-close">&times;</button>
-            </div>
-            
-            <div class="museum-modal-body custom-scroll">
-                <div class="museum-role-layout">
-                    <!-- 图片容器：直接使用 file_url -->
-                    <div class="museum-role-img-container">
-                        <img src="${item.file_url}" class="museum-role-img" loading="lazy" onerror="this.style.display='none'">
-                    </div>
-                    <!-- 描述容器 -->
-                    <div class="museum-role-info">
-                        <div style="font-size:0.8em; opacity:0.7; margin-bottom:5px;">角色介绍:</div>
-                        <div class="museum-role-desc custom-scroll">${data.description || '暂无介绍'}</div>
-                    </div>
-                </div>
-
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid var(--SmartThemeBorderColor); padding-top:10px;">
-                    版本历史:
-                </div>
-                
-                <div class="museum-timeline">
-                    ${timelineHtml}
-                </div>
-            </div>
-        </div>
-    </div>
-    `;
-
-    // 5. 显示弹窗
-    $('#museum-role-modal').remove();
-    $('body').append(modalHtml);
-
-    // 6. 绑定关闭事件
-    const closeModal = () => $('#museum-role-modal').remove();
-    
-    // 关键修正：关闭按钮阻止冒泡
-    $('#museum-role-close').on('click', function(e) {
-        e.stopPropagation();
-        closeModal();
-    });
-    
-    // 点击遮罩层关闭
-    $('.museum-modal-overlay').on('click', function(e) {
-        // 如果点击的是背景遮罩层（非内容区），才关闭，并阻止冒泡
-        if ($(e.target).hasClass('museum-modal-overlay')) {
-            e.stopPropagation();
-            closeModal();
-        }
-    });
-    
-    // 防止点击内容区域关闭抽屉 (虽然挂载在body通常不会，但为了保险)
-    $('.museum-modal-content').on('click', function(e) {
-        e.stopPropagation();
-    });
-
-    // 7. 绑定“导入”按钮点击事件
-    $('.import-role-btn').on('click', async function(e) {
-        e.stopPropagation(); // 核心：阻止冒泡
-        
-        const url = $(this).data('url');
-        const name = $(this).data('name');
-        const btn = $(this);
-        const originalText = btn.html();
-
-        btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
-        
-        await performCharacterImport(url, name);
-        
-        btn.html('<i class="fa-solid fa-check"></i>');
-        setTimeout(() => btn.html(originalText), 2000);
-    });
+    setTimeout(() => $btn.text(originalText), 2000);
 }
 
-// 模拟 ST 原生导入逻辑
+// 核心 ST 导入逻辑
 async function performCharacterImport(url, charName) {
     try {
         if (!url) throw new Error("无效的文件链接");
 
-        // 1. 下载图片 Blob
         const res = await fetch(url);
         if (!res.ok) throw new Error(`下载失败: ${res.status}`);
         const blob = await res.blob();
 
-        // 2. 构造 File 对象
         let ext = 'png';
         if (blob.type.includes('json') || url.endsWith('.json')) ext = 'json';
         
@@ -746,31 +629,26 @@ async function performCharacterImport(url, charName) {
         const filename = `${cleanName}.${ext}`;
         const file = new File([blob], filename, { type: blob.type });
 
-        // 3. 寻找 SillyTavern 的导入输入框
         const stImportInput = document.getElementById('character_import_file');
         
-        if (!stImportInput) {
-            throw new Error("找不到 SillyTavern 的角色导入组件 (#character_import_file)");
-        }
+        if (!stImportInput) throw new Error("找不到角色导入组件");
 
-        // 4. 利用 DataTransfer 将 File 对象塞进 input
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
         stImportInput.files = dataTransfer.files;
 
-        // 5. 触发 change 事件
         const changeEvent = new Event('change', { bubbles: true });
         stImportInput.dispatchEvent(changeEvent);
 
-        toast.success(`正在导入角色: ${charName}`);
+        toast.success(`正在导入: ${charName}`);
 
     } catch (e) {
         console.error(e);
         toast.error(`导入失败: ${e.message}`);
+        throw e;
     }
 }
 
-// 美化主题导入
 async function importBeautifyDirectly(item, $card) {
     const btn = $card.find('.import-btn');
     const originalText = btn.html();
@@ -788,16 +666,14 @@ async function importBeautifyDirectly(item, $card) {
         const themeUrl = selectedVar.file;
         const themeName = selectedVar.name || json.title || "自定义主题";
 
-        btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 下载中...');
+        btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
 
         const response = await fetch(themeUrl);
-        if (!response.ok) throw new Error(`网络请求失败: ${response.status}`);
+        if (!response.ok) throw new Error(`网络请求失败`);
         
         const blob = await response.blob();
         const fileName = `${themeName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}.json`;
         const file = new File([blob], fileName, { type: "application/json" });
-
-        btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 导入中...');
 
         const stThemeInput = document.getElementById('ui_preset_import_file');
         if (!stThemeInput) throw new Error("找不到 ST 主题导入组件");
@@ -809,18 +685,15 @@ async function importBeautifyDirectly(item, $card) {
         const changeEvent = new Event('change', { bubbles: true });
         stThemeInput.dispatchEvent(changeEvent);
 
-        toast.success(`主题 "${themeName}" 已成功导入！`);
+        toast.success(`主题 "${themeName}" 已导入`);
+        btn.html('<i class="fa-solid fa-check"></i>');
         
-        setTimeout(() => {
-            btn.html('<i class="fa-solid fa-check"></i> 成功');
-            setTimeout(() => btn.html(originalText), 2000);
-        }, 500);
-
     } catch (e) {
         console.error(e);
-        toast.error("主题导入失败: " + e.message);
-        btn.html(originalText);
+        toast.error("导入失败: " + e.message);
+        btn.html('<i class="fa-solid fa-xmark"></i>');
     }
+    setTimeout(() => btn.html(originalText), 2000);
 }
 
 // --- 界面创建 ---
@@ -882,7 +755,7 @@ function initializePlugin() {
     
     if (document.getElementById(EXTENSION_ID)) return;
 
-    // 注入 CSS 样式（核心修改位置）
+    // 注入 CSS 样式
     injectStyles();
 
     const html = createSettingsHtml();

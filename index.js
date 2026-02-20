@@ -42,7 +42,7 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- 样式注入 (本次重点修改部分) ---
+// --- 样式注入 (修复图片高度自适应) ---
 function injectStyles() {
     if ($('#museum-extension-styles').length) return;
 
@@ -55,6 +55,8 @@ function injectStyles() {
             width: 100%;
             /* 移动端默认: 3 列 */
             grid-template-columns: repeat(3, 1fr);
+            /* 【核心修改】顶部对齐，允许卡片高度不一致（瀑布流效果取决于列宽，非真正瀑布流但不再拉伸） */
+            align-items: start;
         }
 
         /* PC端 (宽度大于800px): 2 列 */
@@ -74,7 +76,7 @@ function injectStyles() {
             display: flex;
             flex-direction: column;
             transition: all 0.2s ease;
-            /* 【核心修改】移除固定高度，防止挤压 */
+            /* 【核心修改】高度完全自适应内容 */
             height: auto; 
             box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }
@@ -88,26 +90,27 @@ function injectStyles() {
         /* === 图片容器 === */
         .museum-thumb-container {
             width: 100%;
-            /* 【核心修改】使用 aspect-ratio 替代固定 height */
-            /* 3/4 或 2/3 是常见的角色卡比例，这样不会被压扁 */
-            aspect-ratio: 3/4; 
+            /* 【核心修改】移除 aspect-ratio 和固定高度 */
+            height: auto; 
             flex-shrink: 0;
             background-color: rgba(0,0,0,0.05);
             position: relative;
             overflow: hidden;
             border-bottom: 1px solid var(--SmartThemeBorderColor);
+            /* 消除图片底部的微小空隙 */
+            display: flex; 
         }
 
         .museum-preview-img {
             width: 100%;
-            height: 100%;
-            object-fit: cover; /* 保持比例填充，多余部分裁切 */
-            object-position: top center; /* 优先显示头部 */
+            /* 【核心修改】高度自动，保持原图比例 */
+            height: auto; 
+            display: block;
             transition: transform 0.5s ease;
         }
         
         .museum-item:hover .museum-preview-img {
-            transform: scale(1.08); /* 悬停轻微放大 */
+            transform: scale(1.05); 
         }
 
         .museum-type-tag {
@@ -132,24 +135,24 @@ function injectStyles() {
             gap: 8px;
             background-color: var(--SmartThemeBgColor);
             z-index: 2;
-            flex-grow: 1; /* 填满剩余高度 */
+            /* 移除 flex-grow，让其紧贴图片下方 */
         }
 
         .museum-title {
             font-size: 0.95em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.2;
+            /* 允许标题换行，防止撑破布局 */
+            white-space: normal;
+            word-break: break-all;
+            line-height: 1.3;
         }
 
         /* 按钮组 */
         .museum-btn-group {
             display: flex;
             gap: 6px;
-            margin-top: auto; /* 按钮始终在底部 */
+            margin-top: 5px;
         }
 
         .museum-action-btn {
@@ -187,6 +190,8 @@ function injectStyles() {
         }
 
         /* === 内部覆盖层 (详情/历史) === */
+        /* 修改覆盖层逻辑：因为父容器高度不固定，绝对定位可能会溢出或不足 */
+        /* 但为了覆盖效果，我们仍保持 absolute full size */
         .museum-card-overlay {
             position: absolute;
             top: 0;
@@ -315,7 +320,7 @@ function injectStyles() {
         .museum-v-btn:hover {
             background: var(--SmartThemeQuoteColor);
             border-color: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor); /* 保持对比度 */
+            color: var(--SmartThemeBodyColor); 
         }
 
         /* 美化颜色点 */
@@ -345,6 +350,7 @@ function injectStyles() {
     `;
     $('head').append(`<style id="museum-extension-styles">${css}</style>`);
 }
+
 
 // --- Supabase 逻辑 (保持不变) ---
 async function loadSupabase() {

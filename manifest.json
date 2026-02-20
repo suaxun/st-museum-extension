@@ -1,0 +1,10 @@
+{
+    "name": "Museum Importer",
+    "display_name": "博物馆素材库 (Museum)",
+    "version": "1.0.0",
+    "author": "YourName",
+    "description": "连接到私有 Supabase 博物馆，一键导入角色卡和美化主题。",
+    "css": "style.css",
+    "js": "index.js",
+    "min_api": "1.0.0"
+}

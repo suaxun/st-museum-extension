@@ -196,3 +196,206 @@
     background: #333;
     color: #fff;
 }
+/* 博物馆扩展容器 */
+.museum-drawer-content {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 5px;
+    height: 100%;
+}
+
+/* 登录/设置区域 - 跟随主题的半透明背景 */
+.museum-auth-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    background: var(--SmartThemeBlurTintColor); /* 使用主题定义的半透明背景 */
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+/* 顶部过滤器 */
+.museum-filter-bar {
+    display: flex;
+    gap: 5px;
+}
+
+.museum-filter-btn {
+    flex: 1;
+    text-align: center;
+    font-size: 0.8em;
+    padding: 6px 5px;
+    opacity: 0.8;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 4px;
+    color: var(--SmartThemeBodyColor);
+    transition: all 0.2s;
+}
+
+.museum-filter-btn:hover {
+    background: var(--SmartThemeBlurTintColor);
+}
+
+.museum-filter-btn.active {
+    opacity: 1;
+    font-weight: bold;
+    background: var(--SmartThemeQuoteColor); /* 选中时使用强调色 */
+    color: var(--SmartThemeBgColor); /* 文字反色，通常为背景色 */
+    border-color: var(--SmartThemeQuoteColor);
+}
+
+/* 画廊网格 - 强制双列布局 */
+.museum-grid {
+    display: grid;
+    /* 修改核心：强制两列，均分宽度 */
+    grid-template-columns: repeat(2, 1fr); 
+    gap: 10px;
+    /* 移除固定高度限制，让它自适应容器 */
+    max-height: none; 
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+/* 单个卡片 */
+.museum-item {
+    /* 核心修改：使用半透明背景叠加边框色，完美融入任何主题 */
+    background-color: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    color: var(--SmartThemeBodyColor);
+    
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    display: flex;
+    flex-direction: column;
+}
+
+.museum-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    border-color: var(--SmartThemeQuoteColor); /* 悬浮时边框变色 */
+}
+
+/* 图片容器 */
+.museum-thumb-container {
+    width: 100%;
+    /* 9:16 比例适合角色卡和手机壁纸 */
+    aspect-ratio: 9/16; 
+    background-color: rgba(0,0,0,0.2); /* 图片未加载时的占位色 */
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.museum-preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.3s;
+}
+
+/* 类型标签 (如: 角色、美化) */
+.museum-type-tag {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    pointer-events: none;
+    text-transform: uppercase;
+}
+
+.museum-info {
+    padding: 10px;
+    font-size: 0.8em;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 卡片标题 */
+.museum-title {
+    font-weight: bold;
+    font-size: 1.1em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--SmartThemeBodyColor); /* 确保文字颜色跟随主题 */
+}
+
+/* 导入按钮 */
+.museum-action-btn {
+    margin-top: 5px;
+    padding: 6px;
+    width: 100%;
+    text-align: center;
+    
+    /* 默认使用引用色作为背景，这是ST主题的强调色 */
+    background-color: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBgColor); /* 确保文字能看清 */
+    
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 4px;
+    transition: filter 0.2s;
+}
+
+.museum-action-btn:hover {
+    filter: brightness(1.2); /* 悬浮变亮 */
+}
+
+/* 颜色选择小圆点容器 */
+.museum-color-dots {
+    display: flex;
+    gap: 6px;
+    margin: 4px 0;
+    flex-wrap: wrap;
+    min-height: 16px; /* 防止没有颜色时塌陷 */
+}
+
+/* 颜色选择小圆点 */
+.color-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid var(--SmartThemeBorderColor); /* 给浅色圆点加个边框 */
+}
+
+.color-dot:hover {
+    transform: scale(1.2);
+}
+
+/* 选中的圆点样式 */
+.color-dot.active {
+    transform: scale(1.2);
+    /* 双层阴影：内层背景色，外层强调色 */
+    box-shadow: 0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor);
+}
+
+/* 加载动画 */
+.museum-spinner {
+    text-align: center;
+    padding: 30px;
+    opacity: 0.7;
+    color: var(--SmartThemeBodyColor);
+}
+
+/* 隐藏的数据存储 */
+.museum-selected-idx {
+    display: none;
+}

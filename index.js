@@ -42,55 +42,55 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- 样式注入 (优化版：智能网格 + 比例控制) ---
+// --- 样式注入 (本次重点修改部分) ---
 function injectStyles() {
     if ($('#museum-extension-styles').length) return;
 
     const css = `
-        /* === 网格布局优化 === */
+        /* === 网格布局 === */
         .museum-grid {
             display: grid;
             gap: 12px;
             padding: 10px 0;
             width: 100%;
-            /* 默认移动端：强制3列，适合小屏快速浏览 */
+            /* 移动端默认: 3 列 */
             grid-template-columns: repeat(3, 1fr);
         }
 
-        /* PC端 (利用容器查询思路) */
-        /* ST的扩展面板宽度可变，使用 auto-fill 自动填满，最小宽度设为 140px */
+        /* PC端 (宽度大于800px): 2 列 */
         @media (min-width: 800px) {
             .museum-grid {
-                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                grid-template-columns: repeat(2, 1fr);
             }
         }
 
-        /* === 卡片样式 === */
+        /* === 卡片基础样式 === */
         .museum-item {
             background-color: var(--SmartThemeBgColor);
             border: 1px solid var(--SmartThemeBorderColor);
             border-radius: 8px;
             overflow: hidden;
-            position: relative;
+            position: relative; 
             display: flex;
             flex-direction: column;
-            transition: all 0.2s;
-            /* 移除固定高度，防止挤压 */
-            height: auto;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s ease;
+            /* 【核心修改】移除固定高度，防止挤压 */
+            height: auto; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
         }
+        
         .museum-item:hover {
             border-color: var(--SmartThemeQuoteColor);
-            transform: translateY(-3px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
-            z-index: 2;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         }
 
-        /* 顶部图片容器 (核心修改：使用纵横比) */
+        /* === 图片容器 === */
         .museum-thumb-container {
             width: 100%;
-            /* 强制 2:3 比例，完美适配角色卡竖图，不再写死像素高度 */
-            aspect-ratio: 2 / 3; 
+            /* 【核心修改】使用 aspect-ratio 替代固定 height */
+            /* 3/4 或 2/3 是常见的角色卡比例，这样不会被压扁 */
+            aspect-ratio: 3/4; 
             flex-shrink: 0;
             background-color: rgba(0,0,0,0.05);
             position: relative;
@@ -101,19 +101,19 @@ function injectStyles() {
         .museum-preview-img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            /* 角色卡重点通常在头部，所以靠上对齐 */
-            object-position: top center; 
-            transition: transform 0.5s ease-out;
+            object-fit: cover; /* 保持比例填充，多余部分裁切 */
+            object-position: top center; /* 优先显示头部 */
+            transition: transform 0.5s ease;
         }
+        
         .museum-item:hover .museum-preview-img {
-            transform: scale(1.08);
+            transform: scale(1.08); /* 悬停轻微放大 */
         }
 
         .museum-type-tag {
             position: absolute;
-            top: 5px;
-            right: 5px;
+            top: 6px;
+            right: 6px;
             background: rgba(0,0,0,0.6);
             color: #fff;
             font-size: 10px;
@@ -124,19 +124,19 @@ function injectStyles() {
             pointer-events: none;
         }
 
-        /* 底部信息区 */
+        /* === 底部信息区 === */
         .museum-info {
-            padding: 8px 10px;
+            padding: 10px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
             background-color: var(--SmartThemeBgColor);
             z-index: 2;
-            flex-grow: 1; /* 填满剩余空间 */
+            flex-grow: 1; /* 填满剩余高度 */
         }
 
         .museum-title {
-            font-size: 0.9em;
+            font-size: 0.95em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
             white-space: nowrap;
@@ -148,29 +148,29 @@ function injectStyles() {
         /* 按钮组 */
         .museum-btn-group {
             display: flex;
-            gap: 5px;
-            margin-top: auto; /* 保证按钮永远在底部 */
-            padding-top: 4px;
+            gap: 6px;
+            margin-top: auto; /* 按钮始终在底部 */
         }
 
         .museum-action-btn {
             background-color: var(--SmartThemeQuoteColor);
             color: var(--SmartThemeBodyColor);
             text-align: center;
-            padding: 5px 0;
+            padding: 6px 0;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 0.8em;
+            font-size: 0.85em;
             flex: 1;
             transition: opacity 0.2s;
             border: 1px solid transparent;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 5px;
             font-weight: 500;
         }
         .museum-action-btn:hover {
+            opacity: 0.85;
             filter: brightness(1.1);
         }
         
@@ -178,12 +178,12 @@ function injectStyles() {
             background-color: transparent;
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            flex: 0 0 28px; /* 小按钮宽度 */
+            flex: 0 0 32px; /* 方形按钮 */
         }
         .museum-action-btn.secondary:hover {
             border-color: var(--SmartThemeQuoteColor);
             color: var(--SmartThemeQuoteColor);
-            background-color: rgba(125, 125, 125, 0.1);
+            background-color: rgba(128,128,128,0.05);
         }
 
         /* === 内部覆盖层 (详情/历史) === */
@@ -198,115 +198,146 @@ function injectStyles() {
             display: flex;
             flex-direction: column;
             transform: translateY(100%);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            padding: 10px;
+            transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+            padding: 0;
             box-sizing: border-box;
         }
         .museum-card-overlay.active {
             transform: translateY(0);
         }
 
+        /* 覆盖层头部 */
         .museum-overlay-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-bottom: 8px;
+            padding: 10px 12px;
             border-bottom: 1px solid var(--SmartThemeBorderColor);
-            margin-bottom: 8px;
+            background-color: rgba(0,0,0,0.03);
             flex-shrink: 0;
         }
         .museum-overlay-title {
-            font-size: 0.85em;
+            font-size: 0.9em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
         }
         .museum-overlay-close {
             cursor: pointer;
-            padding: 2px 6px;
-            font-size: 1.1em;
+            padding: 4px;
             opacity: 0.6;
+            transition: opacity 0.2s;
         }
-        .museum-overlay-close:hover { opacity: 1; }
+        .museum-overlay-close:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
 
+        /* 覆盖层内容滚动区 */
         .museum-overlay-body {
             flex-grow: 1;
             overflow-y: auto;
-            font-size: 0.8em;
+            padding: 12px;
+            font-size: 0.85em;
             color: var(--SmartThemeBodyColor);
             scrollbar-width: thin;
             scrollbar-color: var(--SmartThemeQuoteColor) transparent;
         }
-        .museum-overlay-body::-webkit-scrollbar { width: 3px; }
+        .museum-overlay-body::-webkit-scrollbar { width: 4px; }
         .museum-overlay-body::-webkit-scrollbar-thumb { background: var(--SmartThemeQuoteColor); border-radius: 2px; }
 
+        /* 角色简介 */
         .museum-role-desc {
-            margin-bottom: 12px;
-            line-height: 1.4;
-            opacity: 0.85;
+            margin-bottom: 15px;
+            line-height: 1.5;
+            opacity: 0.9;
             white-space: pre-wrap;
-            text-align: justify;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed var(--SmartThemeBorderColor);
         }
 
         /* 迷你时间轴列表 */
         .museum-mini-timeline {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
         }
+        
+        .timeline-label {
+            font-size: 0.8em;
+            opacity: 0.6;
+            margin-bottom: 5px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
         .museum-version-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 5px;
-            background: rgba(125,125,125,0.05);
-            border-radius: 4px;
+            padding: 8px;
+            background: rgba(128,128,128,0.05);
+            border-radius: 6px;
             border: 1px solid var(--SmartThemeBorderColor);
+            transition: background 0.2s;
         }
+        .museum-version-row:hover {
+            background: rgba(128,128,128,0.1);
+        }
+        
         .museum-version-info {
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            margin-right: 5px;
         }
-        .museum-v-date { font-weight: bold; font-size: 0.9em; }
-        .museum-v-note { font-size: 0.8em; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;}
+        .museum-v-date { 
+            font-weight: bold; 
+            font-size: 0.9em; 
+            color: var(--SmartThemeBodyColor);
+        }
+        .museum-v-note { 
+            font-size: 0.8em; 
+            opacity: 0.7; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            max-width: 100%;
+        }
         
         .museum-v-btn {
             font-size: 0.8em;
-            padding: 2px 6px;
-            background: transparent;
+            padding: 4px 10px;
+            background: var(--SmartThemeBgColor);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            border-radius: 3px;
+            border-radius: 4px;
             cursor: pointer;
             white-space: nowrap;
+            transition: all 0.2s;
         }
         .museum-v-btn:hover {
             background: var(--SmartThemeQuoteColor);
             border-color: var(--SmartThemeQuoteColor);
-            color: #000;
+            color: var(--SmartThemeBodyColor); /* 保持对比度 */
         }
 
         /* 美化颜色点 */
         .museum-color-dots {
             display: flex;
-            gap: 4px;
+            gap: 5px;
             overflow-x: auto;
             padding-bottom: 4px;
             margin-bottom: 2px;
-            height: 18px; /* 固定高度防止跳动 */
-            align-items: center;
         }
         .color-dot {
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             border: 1px solid rgba(128,128,128,0.3);
             cursor: pointer;
             flex-shrink: 0;
             transition: transform 0.2s;
         }
-        .color-dot:hover { transform: scale(1.2); }
-        .color-dot.active { transform: scale(1.3); border-color: var(--SmartThemeBodyColor); }
+        .color-dot:hover {
+            transform: scale(1.2);
+        }
         
         /* 旋转动画 */
         .fa-spin { animation: fa-spin 2s infinite linear; }
@@ -485,7 +516,7 @@ function renderItems(items) {
 
         // 角色卡的“详情”按钮
         const detailBtn = item.type === 'role_card' 
-            ? `<div class="museum-action-btn secondary toggle-overlay-btn" title="查看详情与历史版本"><i class="fa-solid fa-list"></i></div>` 
+            ? `<div class="museum-action-btn secondary toggle-overlay-btn" title="查看详情与历史版本"><i class="fa-solid fa-list-ul"></i></div>` 
             : '';
 
         const cardHtml = `
@@ -503,7 +534,7 @@ function renderItems(items) {
                     
                     <div class="museum-btn-group">
                         <div class="museum-action-btn import-btn">
-                            <i class="fa-solid fa-download"></i> 导入最新
+                            <i class="fa-solid fa-download"></i> 导入
                         </div>
                         ${detailBtn}
                     </div>
@@ -513,11 +544,13 @@ function renderItems(items) {
                 ${item.type === 'role_card' ? `
                 <div class="museum-card-overlay">
                     <div class="museum-overlay-header">
-                        <span class="museum-overlay-title">详情 & 历史</span>
+                        <span class="museum-overlay-title"><i class="fa-solid fa-clock-rotate-left"></i> 档案记录</span>
                         <div class="museum-overlay-close toggle-overlay-btn"><i class="fa-solid fa-xmark"></i></div>
                     </div>
                     <div class="museum-overlay-body">
                         <div class="museum-role-desc">${description}</div>
+                        
+                        <div class="timeline-label">历史版本</div>
                         <div class="museum-mini-timeline"></div>
                     </div>
                 </div>` : ''}
@@ -534,7 +567,7 @@ function renderItems(items) {
                 e.stopPropagation();
                 const idx = $(this).data('idx');
                 const selectedVar = variations[idx];
-                $card.find('.color-dot').css({'border-color': 'rgba(255,255,255,0.3)', 'transform': 'scale(1)'});
+                $card.find('.color-dot').css({'border-color': 'rgba(128,128,128,0.3)', 'transform': 'scale(1)'});
                 $(this).css({'border-color': 'var(--SmartThemeQuoteColor)', 'transform': 'scale(1.2)'});
                 
                 if (selectedVar && selectedVar.preview) {
@@ -555,7 +588,7 @@ function renderItems(items) {
                 const rowHtml = `
                     <div class="museum-version-row">
                         <div class="museum-version-info">
-                            <span class="museum-v-date">${formatDateShort(ver.date)} ${isLatest ? '<span style="color:#4caf50; font-size:0.8em">NEW</span>' : ''}</span>
+                            <span class="museum-v-date">${formatDateShort(ver.date)} ${isLatest ? '<span style="color:#4caf50; font-size:0.8em; margin-left:4px;">NEW</span>' : ''}</span>
                             <span class="museum-v-note" title="${ver.note || ''}">${ver.note || '无说明'}</span>
                         </div>
                         <button class="museum-v-btn history-import-btn" data-url="${ver.png || ver.json}">
@@ -622,13 +655,13 @@ async function handleImport(item, $card) {
 // 历史版本导入
 async function handleHistoryImport(url, charName, $btn) {
     const originalText = $btn.text();
-    $btn.text('Wait...');
+    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
     
     try {
         await performCharacterImport(url, charName);
-        $btn.text('OK');
+        $btn.html('<i class="fa-solid fa-check"></i>');
     } catch (e) {
-        $btn.text('Error');
+        $btn.html('<i class="fa-solid fa-xmark"></i>');
     }
     setTimeout(() => $btn.text(originalText), 2000);
 }

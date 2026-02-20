@@ -169,12 +169,15 @@ async function refreshGallery() {
     }
 }
 
+// --- 数据获取与渲染 ---
+
 function renderItems(items) {
     const grid = $('#museum-grid');
     grid.empty();
 
     if (items.length === 0) {
-        grid.html('<div style="text-align:center; padding:20px; opacity: 0.6;">暂无内容</div>');
+        // 使用 ST 标准文字颜色变量
+        grid.html('<div style="text-align:center; padding:20px; opacity: 0.7; color: var(--SmartThemeBodyColor);">暂无内容</div>');
         return;
     }
 
@@ -184,7 +187,7 @@ function renderItems(items) {
         let imgUrl = "";
         let variations = [];
         
-        // 数据解析逻辑
+        // ... (数据解析逻辑保持不变) ...
         if (item.type === 'role_card') {
             typeLabel = "角色";
             try {
@@ -209,43 +212,70 @@ function renderItems(items) {
             } catch (e) { }
         }
 
-        // 构建颜色小圆点的 HTML
+        // 构建颜色小圆点
         let colorDotsHtml = '';
         if (item.type === 'beautify' && variations.length > 0) {
-            colorDotsHtml = '<div class="museum-dots">';
+            colorDotsHtml = '<div class="museum-color-dots" style="display:flex; gap:6px; margin: 8px 0; flex-wrap: wrap;">';
             variations.forEach((v, idx) => {
-                const activeClass = idx === 0 ? 'active' : '';
+                // 圆点选中样式：使用 ST 的 QuoteColor 作为高亮边框
+                const activeClass = idx === 0 ? 'box-shadow: 0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor); transform: scale(1.1);' : '';
                 colorDotsHtml += `
-                    <div class="color-dot ${activeClass}" 
-                         data-idx="${idx}" 
-                         title="${v.name || '样式'}" 
-                         style="background-color: ${v.color || '#ccc'};">
+                    <div class="color-dot" data-idx="${idx}" title="${v.name || '样式'}" 
+                         style="width: 14px; height: 14px; border-radius: 50%; background-color: ${v.color || '#ccc'}; cursor: pointer; transition: all 0.2s; border: 1px solid var(--SmartThemeBorderColor); ${activeClass}">
                     </div>
                 `;
             });
             colorDotsHtml += '</div>';
-        } else {
-            // 如果不是美化或没有变体，保留占位防止布局跳动，或者可以根据喜好去掉
-            colorDotsHtml = '<div class="museum-dots" style="visibility:hidden"></div>';
         }
 
-        // 核心卡片 HTML结构 - 使用 CSS 类名代替内联样式
+        // === 这里的样式全部换成了 CSS 变量 ===
         const cardHtml = `
-            <div class="museum-card" data-id="${item.id}">
-                <div class="museum-img-container">
-                    <img class="museum-preview-img" src="${imgUrl}" loading="lazy">
-                    <div class="museum-type-tag">${typeLabel}</div>
+            <div class="museum-item" data-id="${item.id}" style="
+                border: 1px solid var(--SmartThemeBorderColor); 
+                border-radius: 8px; 
+                overflow: hidden; 
+                background-color: rgba(0, 0, 0, 0.2); 
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                transition: transform 0.2s;
+            ">
+                <!-- 图片区域 -->
+                <div style="width:100%; aspect-ratio:9/16; max-height: 250px; background: rgba(0,0,0,0.3); overflow:hidden; display:flex; align-items:center; justify-content:center; position: relative;">
+                    <img class="museum-preview-img" src="${imgUrl}" style="width:100%; height:100%; object-fit:cover; transition: opacity 0.3s;" loading="lazy">
+                    
+                    <!-- 类型标签：半透明黑底白字，保持清晰 -->
+                    <div style="
+                        position: absolute; top: 8px; left: 8px; 
+                        background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px);
+                        color: #fff; 
+                        padding: 2px 8px; border-radius: 4px; font-size: 0.7em; letter-spacing: 1px;
+                    ">${typeLabel}</div>
                 </div>
-                
-                <div class="museum-info">
-                    <div class="museum-title" title="${title}">${title}</div>
+
+                <!-- 信息区域 -->
+                <div class="museum-info" style="padding: 12px; color: var(--SmartThemeBodyColor);">
+                    
+                    <!-- 标题 -->
+                    <div class="museum-title" title="${title}" style="
+                        font-weight: bold; font-size: 1.1em; margin-bottom: 5px; 
+                        color: var(--SmartThemeBodyColor); 
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                        text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+                    ">${title}</div>
                     
                     ${colorDotsHtml}
 
-                    <!-- 隐藏的数据存储器 -->
                     <div class="museum-selected-idx" data-idx="0" style="display:none;"></div>
 
-                    <div class="museum-import-btn import-btn">
+                    <!-- 导入按钮：使用主题强调色 (QuoteColor) -->
+                    <div class="museum-action-btn import-btn" style="
+                        margin-top: 10px; 
+                        background-color: var(--SmartThemeQuoteColor); 
+                        color: var(--SmartThemeBgColor); 
+                        filter: brightness(1.1);
+                        border: 1px solid var(--SmartThemeBorderColor);
+                        padding: 8px; text-align: center; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: bold;
+                        transition: filter 0.2s;
+                    " onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1.1)'">
                         <i class="fa-solid fa-download"></i> 导入
                     </div>
                 </div>
@@ -262,31 +292,27 @@ function renderItems(items) {
                 const idx = $this.data('idx');
                 const selectedVar = variations[idx];
 
-                // 移除其他激活状态
-                $card.find('.color-dot').removeClass('active');
-                // 激活当前
-                $this.addClass('active');
+                // 更新圆点高亮样式 (使用 CSS 变量)
+                $card.find('.color-dot').css({'box-shadow': 'none', 'transform': 'none'});
+                $this.css({
+                    'box-shadow': '0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor)',
+                    'transform': 'scale(1.1)'
+                });
 
-                // 更新图片
                 if (selectedVar && selectedVar.preview) {
                     const $img = $card.find('.museum-preview-img');
                     $img.css('opacity', 0.5);
                     $img.attr('src', selectedVar.preview);
                     $img.on('load', () => $img.css('opacity', 1));
                 }
-
-                // 更新隐藏记录器
                 $card.find('.museum-selected-idx').data('idx', idx);
             });
         }
 
-        // 绑定导入事件
         $card.find('.import-btn').on('click', () => handleImport(item, $card));
         grid.append($card);
     });
 }
-
-// --- 导入动作处理 ---
 
 // --- 导入动作处理 ---
 
@@ -586,171 +612,13 @@ async function applyThemeUrl(cssUrl, themeName) {
 }
 
 
+// --- 界面创建 (参考参考代码的写法) ---
+
 function createSettingsHtml() {
     // 获取当前设置用于回填 HTML
     const settings = getExtensionSettings()[EXTENSION_NAME] || {};
     
     return `
-    <!-- 注入 CSS 样式 -->
-    <style>
-        /* 博物馆容器 */
-        .museum-drawer-content {
-            padding: 5px;
-        }
-
-        /* 过滤按钮组 */
-        .museum-filter-bar {
-            display: flex;
-            gap: 10px;
-            margin: 10px 0;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--SmartThemeBorderColor);
-        }
-        .museum-filter-btn {
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            cursor: pointer;
-            border: 1px solid transparent;
-            transition: all 0.3s;
-            opacity: 0.7;
-        }
-        .museum-filter-btn:hover {
-            opacity: 1;
-            background-color: var(--SmartThemeBlurTintColor);
-        }
-        .museum-filter-btn.active {
-            opacity: 1;
-            background-color: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBgColor); /* 确保文字在亮色背景上可见 */
-            font-weight: bold;
-        }
-
-        /* 网格布局 */
-        .museum-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 15px;
-            padding: 10px 0;
-        }
-
-        /* 卡片主体 - 核心样式适配 */
-        .museum-card {
-            background-color: var(--SmartThemeBgColor);
-            border: 1px solid var(--SmartThemeBorderColor);
-            border-radius: 10px;
-            overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
-            position: relative;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        }
-        .museum-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 5px 15px var(--SmartThemeShadowColor);
-            border-color: var(--SmartThemeQuoteColor);
-        }
-
-        /* 图片容器 */
-        .museum-img-container {
-            width: 100%;
-            aspect-ratio: 2/3; /* 角色卡比例，根据需要改 */
-            background-color: rgba(0,0,0,0.1);
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-        .museum-preview-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: opacity 0.3s;
-        }
-
-        /* 类型标签 */
-        .museum-type-tag {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            background: rgba(0, 0, 0, 0.6);
-            color: #fff;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.7em;
-            backdrop-filter: blur(2px);
-        }
-
-        /* 信息区域 */
-        .museum-info {
-            padding: 10px;
-            border-top: 1px solid var(--SmartThemeBorderColor);
-            background: var(--SmartThemeBlurTintColor); /* 轻微的半透明背景 */
-        }
-
-        /* 标题 */
-        .museum-title {
-            font-weight: bold;
-            font-size: 0.95em;
-            color: var(--SmartThemeBodyColor);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            margin-bottom: 8px;
-        }
-
-        /* 颜色圆点容器 */
-        .museum-dots {
-            display: flex;
-            gap: 6px;
-            margin-bottom: 10px;
-            flex-wrap: wrap;
-            min-height: 16px; /* 防止没有点时高度塌陷 */
-        }
-        .color-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            border: 1px solid var(--SmartThemeBorderColor); /* 适配边框色 */
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        .color-dot:hover {
-            transform: scale(1.2);
-        }
-        .color-dot.active {
-            transform: scale(1.3);
-            box-shadow: 0 0 0 2px var(--SmartThemeBgColor), 0 0 0 3px var(--SmartThemeQuoteColor);
-        }
-
-        /* 导入按钮 */
-        .museum-import-btn {
-            width: 100%;
-            padding: 6px 0;
-            background-color: var(--SmartThemeQuoteColor); /* 使用主题强调色 */
-            color: var(--SmartThemeBgColor); /* 适配对比色 */
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.9em;
-            font-weight: bold;
-            text-align: center;
-            transition: opacity 0.2s;
-        }
-        .museum-import-btn:hover {
-            opacity: 0.8;
-        }
-
-        /* 设置面板 */
-        .museum-auth-box {
-            background: var(--SmartThemeBlurTintColor);
-            border: 1px solid var(--SmartThemeBorderColor);
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 15px;
-        }
-    </style>
-
     <div id="${EXTENSION_ID}" class="inline-drawer wide100p flexFlowColumn">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b><i class="fa-solid fa-building-columns"></i> 博物馆 (Museum)</b>
@@ -758,7 +626,7 @@ function createSettingsHtml() {
         </div>
 
         <div class="inline-drawer-content museum-drawer-content">
-            <div class="flex-container" style="justify-content: flex-end; margin-bottom: 5px;">
+            <div class="flex-container">
                 <div class="menu_button fa-solid fa-arrows-rotate" id="museum-refresh-btn" title="刷新"></div>
                 <div class="menu_button fa-solid fa-gear" id="museum-config-toggle" title="设置"></div>
             </div>
@@ -787,7 +655,6 @@ function createSettingsHtml() {
     </div>
     `;
 }
-
 
 // --- 初始化逻辑 (模仿参考代码结构) ---
 

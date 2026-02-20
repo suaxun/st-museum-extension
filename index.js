@@ -229,75 +229,148 @@ function renderItems(items) {
     });
 }
 
+// --- 导入动作处理 ---
+
 async function handleImport(item) {
-    if (item.type === 'role_card') await importRoleCard(item);
-    else if (item.type === 'beautify') await importBeautify(item);
-}
-
-async function importRoleCard(item) {
-    const btn = $(`div[data-id="${item.id}"] .import-btn`);
-    const originalText = btn.html();
-    btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
-
-    try {
-        const response = await fetch(item.file_url);
-        const blob = await response.blob();
-        const file = new File([blob], "card.png", { type: blob.type });
-        const formData = new FormData();
-        formData.append('avatar', file);
-
-        const res = await fetch('/api/characters/import', { method: 'POST', body: formData });
-        const result = await res.json();
-
-        if (result.file_name) {
-            toast.success(`角色 "${result.name}" 已导入`);
-            $("#rm_button_characters").click(); 
-        } else {
-            throw new Error("API 返回异常");
-        }
-    } catch (e) {
-        toast.error("导入失败: " + e.message);
-    } finally {
-        btn.html(originalText);
+    if (item.type === 'role_card') {
+        await importRoleCard(item);
+    } else if (item.type === 'beautify') {
+        // 调用新的美化导入逻辑
+        await importBeautifySmart(item);
     }
 }
 
-async function importBeautify(item) {
+// 智能美化导入：处理多变体
+async function importBeautifySmart(item) {
     const btn = $(`div[data-id="${item.id}"] .import-btn`);
     const originalText = btn.html();
-    btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
-
+    
     try {
-        let cssUrl = "";
+        // 1. 解析 JSON 内容
+        let variations = [];
+        let title = "未知主题";
         try {
             const json = JSON.parse(item.content);
-            if (json.variations && json.variations[0]) cssUrl = json.variations[0].file;
-        } catch(e) {}
-
-        if (!cssUrl) throw new Error("未找到 CSS 链接");
-        const res = await fetch(cssUrl);
-        const cssText = await res.text();
-        if (!cssText) throw new Error("CSS 内容为空");
-
-        const textArea = document.getElementById('customCSS');
-        if (textArea) {
-            textArea.value = cssText;
-            textArea.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            // 触发 SillyTavern 保存逻辑
-            const context = getContext();
-            if (context && context.saveSettingsDebounced) context.saveSettingsDebounced();
-            
-            toast.success("主题应用成功");
-        } else {
-            toast.warning("找不到 CSS 输入框，请确保您在用户设置界面");
+            title = json.title || title;
+            variations = json.variations || [];
+        } catch (e) {
+            console.error("JSON 解析失败", e);
+            throw new Error("数据格式错误");
         }
+
+        if (!variations || variations.length === 0) {
+            throw new Error("该主题没有包含任何配色方案");
+        }
+
+        // 2. 判断变体数量
+        if (variations.length === 1) {
+            // 只有一种，直接导入
+            btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
+            await applyThemeUrl(variations[0].file, variations[0].name);
+        } else {
+            // 有多种，弹出选择框
+            showVariationModal(title, variations);
+        }
+
     } catch (e) {
-        toast.error("美化导入失败: " + e.message);
+        toast.error("准备导入失败: " + e.message);
     } finally {
-        btn.html(originalText);
+        // 只有在单次直接导入失败时恢复按钮，弹窗模式下保持原样即可
+        if (btn.html().includes('spinner')) {
+            btn.html(originalText);
+        }
     }
 }
+
+// 显示选择弹窗
+function showVariationModal(title, variations) {
+    // 移除旧弹窗（防止重复）
+    $('#museum-variation-modal').remove();
+
+    // 构建 HTML
+    let buttonsHtml = '';
+    variations.forEach((v, index) => {
+        // 优先显示 name，没有则显示 "样式 N"
+        const name = v.name || `样式 ${index + 1}`;
+        // 将 url 编码存入 data 属性，防止引号问题
+        buttonsHtml += `<div class="museum-variation-btn" data-url="${v.file}" data-name="${name}">${name}</div>`;
+    });
+
+    const modalHtml = `
+    <div id="museum-variation-modal" class="museum-modal-overlay">
+        <div class="museum-modal-content">
+            <div class="museum-modal-title">导入: ${title}</div>
+            <div style="margin-bottom:10px; font-size:0.9em; opacity:0.8;">请选择配色方案</div>
+            <div class="museum-variation-list">
+                ${buttonsHtml}
+            </div>
+            <button class="museum-modal-close" id="museum-modal-cancel">取消</button>
+        </div>
+    </div>
+    `;
+
+    // 插入 DOM
+    $('body').append(modalHtml);
+
+    // 绑定事件
+    // 1. 点击具体样式
+    $('.museum-variation-btn').on('click', async function() {
+        const url = $(this).data('url');
+        const name = $(this).data('name');
+        
+        // 关闭弹窗
+        $('#museum-variation-modal').remove();
+        
+        // 执行导入
+        toast.info(`正在下载主题: ${name}...`);
+        await applyThemeUrl(url, name);
+    });
+
+    // 2. 点击取消或遮罩层
+    $('#museum-modal-cancel').on('click', () => $('#museum-variation-modal').remove());
+    $('#museum-variation-modal').on('click', (e) => {
+        if (e.target.id === 'museum-variation-modal') $('#museum-variation-modal').remove();
+    });
+}
+
+// 执行具体的 CSS 下载与应用
+async function applyThemeUrl(cssUrl, themeName) {
+    try {
+        if (!cssUrl) throw new Error("CSS 链接无效");
+
+        // 使用 fetch 获取 CSS 文本
+        const res = await fetch(cssUrl);
+        if (!res.ok) throw new Error(`下载失败: ${res.status}`);
+        const cssText = await res.text();
+
+        if (!cssText || cssText.trim().length === 0) throw new Error("CSS 内容为空");
+
+        // 寻找 SillyTavern 的自定义 CSS 输入框
+        const textArea = document.getElementById('customCSS');
+        if (textArea) {
+            // 写入内容
+            textArea.value = cssText;
+            // 触发 input 事件以通知 ST 保存
+            textArea.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            // 强制触发保存设置
+            const context = window.SillyTavern && window.SillyTavern.getContext ? window.SillyTavern.getContext() : null;
+            if (context && context.saveSettingsDebounced) {
+                context.saveSettingsDebounced();
+            } else if (window.saveSettingsDebounced) {
+                window.saveSettingsDebounced();
+            }
+
+            toast.success(`主题 "${themeName}" 应用成功！`);
+        } else {
+            toast.warning("找不到 CSS 输入框，请确保您已打开用户设置面板。");
+        }
+    } catch (e) {
+        console.error(e);
+        toast.error(`应用失败: ${e.message}`);
+    }
+}
+
 
 // --- 界面创建 (参考参考代码的写法) ---
 

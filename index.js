@@ -277,11 +277,11 @@ async function handleImport(item, $card) {
 // === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
 
 async function importRoleCard(item) {
-    // 1. 注入 CSS 样式（包含强力移动端适配）
+    // 1. 注入 CSS 样式（包含移动端适配和主题适配）
     if (!$('#museum-role-styles').length) {
         $('head').append(`
             <style id="museum-role-styles">
-                /* 遮罩层：最高层级，居中对齐 */
+                /* 遮罩层 */
                 .museum-modal-overlay { 
                     position: fixed; 
                     top: 0; 
@@ -289,7 +289,7 @@ async function importRoleCard(item) {
                     width: 100%; 
                     height: 100%; 
                     background: rgba(0,0,0,0.85); 
-                    backdrop-filter: blur(5px); 
+                    backdrop-filter: blur(2px);
                     z-index: 99999; 
                     display: flex; 
                     align-items: center; 
@@ -297,44 +297,61 @@ async function importRoleCard(item) {
                     padding: 0;
                 }
 
-                /* 弹窗容器 */
+                /* 弹窗容器 - 核心配色适配 */
                 .museum-modal-content {
-                    background: var(--SmartThemeBgColor, #1a1b26);
-                    color: var(--SmartThemeBodyColor, #fff);
+                    background-color: var(--SmartThemeBgColor);
+                    color: var(--SmartThemeBodyColor);
+                    border: 1px solid var(--SmartThemeBorderColor);
+                    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+                    
                     padding: 0;
                     border-radius: 12px;
                     width: 100%;
                     max-width: 600px;
                     display: flex;
                     flex-direction: column;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                    border: 1px solid var(--SmartThemeBorderColor, #333);
                     overflow: hidden;
-                    /* 默认 PC 高度适应 */
-                    max-height: 85vh; 
+                    max-height: 85vh; /* PC 端默认高度限制 */
                 }
 
                 /* 顶部标题栏 */
                 .museum-modal-header {
                     padding: 15px;
-                    background: rgba(0,0,0,0.2);
+                    background: var(--SmartThemeBlurTintColor); /* 使用 ST 的半透明色 */
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
+                    border-bottom: 1px solid var(--SmartThemeBorderColor);
                     flex-shrink: 0;
                 }
 
                 .museum-modal-title { font-weight: bold; font-size: 1.1em; }
-                .museum-modal-close-icon { background: none; border: none; color: inherit; font-size: 1.5em; cursor: pointer; opacity: 0.7; padding: 0 10px;}
+                .museum-modal-close-icon { 
+                    background: none; 
+                    border: none; 
+                    color: var(--SmartThemeBodyColor); /* 适配文字颜色 */
+                    font-size: 1.5em; 
+                    cursor: pointer; 
+                    opacity: 0.7; 
+                    padding: 0 10px;
+                }
+                .museum-modal-close-icon:hover { opacity: 1; }
 
-                /* 内容区域：可滚动 */
+                /* 内容区域 */
                 .museum-modal-body {
                     padding: 20px;
-                    overflow-y: auto; /* 核心：让内部滚动 */
+                    overflow-y: auto;
                     -webkit-overflow-scrolling: touch; 
                     flex-grow: 1;
                 }
+
+                /* 滚动条美化（适配 ST 风格） */
+                .museum-modal-body::-webkit-scrollbar { width: 8px; }
+                .museum-modal-body::-webkit-scrollbar-thumb { 
+                    background: var(--SmartThemeQuoteColor); 
+                    border-radius: 4px; 
+                }
+                .museum-modal-body::-webkit-scrollbar-track { background: transparent; }
 
                 /* 角色布局容器 */
                 .museum-role-layout {
@@ -354,7 +371,7 @@ async function importRoleCard(item) {
                     border-radius: 8px;
                     aspect-ratio: 2/3;
                     object-fit: cover;
-                    border: 1px solid var(--SmartThemeBorderColor, #333);
+                    border: 1px solid var(--SmartThemeBorderColor);
                     display: block;
                 }
 
@@ -367,7 +384,8 @@ async function importRoleCard(item) {
                 }
 
                 .museum-role-desc { 
-                    background: rgba(0,0,0,0.2); 
+                    /* 使用引用色块作为背景 */
+                    background: rgba(0, 0, 0, 0.15);
                     padding: 12px; 
                     border-radius: 8px; 
                     font-size: 0.9em; 
@@ -375,7 +393,7 @@ async function importRoleCard(item) {
                     max-height: 180px; 
                     overflow-y: auto; 
                     white-space: pre-wrap;
-                    border-left: 3px solid var(--SmartThemeQuoteColor, #9abdf5);
+                    border-left: 3px solid var(--SmartThemeQuoteColor);
                 }
 
                 /* 时间轴样式 */
@@ -390,13 +408,14 @@ async function importRoleCard(item) {
                     top: 5px;
                     bottom: 5px;
                     width: 2px;
-                    background: rgba(255,255,255,0.1);
+                    background: var(--SmartThemeBorderColor);
+                    opacity: 0.5;
                 }
                 .museum-timeline-item {
                     position: relative;
                     margin-bottom: 15px;
                     padding-bottom: 15px;
-                    border-bottom: 1px solid rgba(255,255,255,0.05);
+                    border-bottom: 1px solid var(--SmartThemeBorderColor);
                 }
                 .museum-timeline-item:last-child { border: none; }
                 .museum-timeline-dot {
@@ -406,8 +425,8 @@ async function importRoleCard(item) {
                     width: 8px;
                     height: 8px;
                     border-radius: 50%;
-                    background: var(--SmartThemeQuoteColor, #9abdf5);
-                    box-shadow: 0 0 0 3px rgba(0,0,0,0.3);
+                    background: var(--SmartThemeQuoteColor);
+                    box-shadow: 0 0 0 3px var(--SmartThemeBgColor); /* 适配背景的阴影 */
                 }
                 .museum-timeline-item.latest .museum-timeline-dot {
                     background: #4caf50;
@@ -427,53 +446,53 @@ async function importRoleCard(item) {
                     padding: 4px 10px;
                     font-size: 0.8em;
                     border-radius: 4px;
-                    border: 1px solid var(--SmartThemeBorderColor, #555);
+                    border: 1px solid var(--SmartThemeBorderColor);
                     background: transparent;
-                    color: var(--SmartThemeBodyColor, #fff);
+                    color: var(--SmartThemeBodyColor);
                     cursor: pointer;
                     transition: all 0.2s;
                     white-space: nowrap;
                 }
                 .museum-btn-sm:hover {
-                    background: var(--SmartThemeQuoteColor, #9abdf5);
-                    color: #000;
-                    border-color: var(--SmartThemeQuoteColor, #9abdf5);
+                    background: var(--SmartThemeQuoteColor);
+                    color: var(--SmartThemeBgColor); /* 悬停时文字变背景色 */
+                    border-color: var(--SmartThemeQuoteColor);
                 }
 
-                /* === 移动端强力适配 === */
+                /* === 移动端强力适配 & 居中修正 === */
                 @media (max-width: 768px) {
                     .museum-modal-overlay {
-                       align-items: center; /* 恢复垂直居中 */
-                       padding: 10px;       /* 增加一些外边距 */
+                       align-items: center; /* 确保垂直居中 */
+                       padding: 0;          /* 移除不需要的内边距 */
                     }
 
                     .museum-modal-content {
-                        width: 95%;         /* 稍微留点边 */
-                        max-height: 85vh;   /* 严格限制高度，防止挤出屏幕 */
-                        margin: auto;       /* 确保居中 */
+                        width: 90%;         /* 左右留白 */
+                        max-height: 80vh;   /* 限制高度为屏幕 80%，确保上下绝对居中 */
+                        margin: 0 auto;     /* 居中保险 */
                     }
                     
                     .museum-role-layout {
                         flex-direction: column;
                         gap: 15px;
                         margin-bottom: 15px;
-                        align-items: center; /* 图片居中 */
+                        align-items: center; /* 内容水平居中 */
                     }
 
-                    /* 图片容器：调整大小并防止被压缩 */
+                    /* 图片容器：完美大小 */
                     .museum-role-img-container {
-                        width: 180px;       /* 图片宽度 */
-                        height: 270px;      /* 强制高度，防止压缩 */
-                        flex-shrink: 0;     /* 禁止被 Flex 压缩 */
+                        width: 160px;       
+                        height: 240px;      
+                        flex-shrink: 0;     
                         margin: 0 auto;
-                        background: rgba(0,0,0,0.2); /* 即使图片加载失败也能看到位置 */
+                        background: rgba(0,0,0,0.1); 
                         border-radius: 8px;
                     }
 
                     .museum-role-img {
                         width: 100%;
                         height: 100%;
-                        object-fit: contain; /* 保持比例，避免裁剪 */
+                        object-fit: contain; /* 完整显示图片 */
                     }
 
                     .museum-role-info {
@@ -481,12 +500,11 @@ async function importRoleCard(item) {
                     }
 
                     .museum-role-desc {
-                        max-height: 120px; /* 限制描述高度，留空间给时间轴 */
+                        max-height: 120px; 
                         font-size: 0.9em;
                         padding: 10px;
                     }
                     
-                    /* 稍微缩小时间轴字体 */
                     .museum-timeline {
                         font-size: 0.9em;
                     }
@@ -554,7 +572,7 @@ async function importRoleCard(item) {
                 <button class="museum-modal-close-icon" id="museum-role-close">&times;</button>
             </div>
             
-            <div class="museum-modal-body custom-scroll">
+            <div class="museum-modal-body">
                 <div class="museum-role-layout">
                     <!-- 图片容器：直接使用 file_url -->
                     <div class="museum-role-img-container">
@@ -567,7 +585,7 @@ async function importRoleCard(item) {
                     </div>
                 </div>
 
-                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid rgba(255,255,255,0.1); padding-top:10px;">
+                <div style="font-size:0.8em; opacity:0.7; margin-bottom:10px; border-top:1px solid var(--SmartThemeBorderColor); padding-top:10px;">
                     版本历史:
                 </div>
                 

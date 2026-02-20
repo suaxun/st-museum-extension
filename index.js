@@ -440,40 +440,41 @@ async function importRoleCard(item) {
                     border-color: var(--SmartThemeQuoteColor, #9abdf5);
                 }
 
-                /* === 移动端强力适配 === */
+                /* === 移动端强力适配 (修正版) === */
                 @media (max-width: 768px) {
                     .museum-modal-overlay {
-                       align-items: center; /* 恢复垂直居中 */
-                       padding: 10px;       /* 增加一些外边距 */
+                       align-items: center; /* 确保Flex尝试居中 */
+                       padding: 10px;
                     }
 
                     .museum-modal-content {
-                        width: 95%;         /* 稍微留点边 */
-                        max-height: 85vh;   /* 严格限制高度，防止挤出屏幕 */
-                        margin: auto;       /* 确保居中 */
+                        width: 95%;         
+                        max-height: 80vh;   /* 【核心修改】降低高度，从85降到80，留出更多空间 */
+                        margin: 0 auto;     /* 水平居中 */
+                        margin-top: 5vh;    /* 【核心修改】强制给一个顶部偏移量，视觉上往下移 */
                     }
                     
                     .museum-role-layout {
                         flex-direction: column;
                         gap: 15px;
                         margin-bottom: 15px;
-                        align-items: center; /* 图片居中 */
+                        align-items: center; 
                     }
 
                     /* 图片容器：调整大小并防止被压缩 */
                     .museum-role-img-container {
                         width: 180px;       /* 图片宽度 */
-                        height: 270px;      /* 强制高度，防止压缩 */
+                        height: 270px;      /* 强制高度 */
                         flex-shrink: 0;     /* 禁止被 Flex 压缩 */
                         margin: 0 auto;
-                        background: rgba(0,0,0,0.2); /* 即使图片加载失败也能看到位置 */
+                        background: rgba(0,0,0,0.2); 
                         border-radius: 8px;
                     }
 
                     .museum-role-img {
                         width: 100%;
                         height: 100%;
-                        object-fit: contain; /* 保持比例，避免裁剪 */
+                        object-fit: contain; /* 保持比例 */
                     }
 
                     .museum-role-info {
@@ -481,7 +482,7 @@ async function importRoleCard(item) {
                     }
 
                     .museum-role-desc {
-                        max-height: 120px; /* 限制描述高度，留空间给时间轴 */
+                        max-height: 120px; 
                         font-size: 0.9em;
                         padding: 10px;
                     }

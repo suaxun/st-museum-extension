@@ -42,75 +42,78 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- 样式注入 (修复PC端布局挤压问题) ---
+// --- 样式注入 (优化版：智能网格 + 比例控制) ---
 function injectStyles() {
     if ($('#museum-extension-styles').length) return;
 
     const css = `
-        /* === 网格布局 === */
+        /* === 网格布局优化 === */
         .museum-grid {
             display: grid;
             gap: 12px;
             padding: 10px 0;
             width: 100%;
-            /* 移动端默认 3 列 */
+            /* 默认移动端：强制3列，适合小屏快速浏览 */
             grid-template-columns: repeat(3, 1fr);
         }
 
+        /* PC端 (利用容器查询思路) */
+        /* ST的扩展面板宽度可变，使用 auto-fill 自动填满，最小宽度设为 140px */
         @media (min-width: 800px) {
             .museum-grid {
-                /* PC端 2 列，让卡片有足够展示空间 */
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
             }
         }
 
-        /* === 卡片基础样式 === */
+        /* === 卡片样式 === */
         .museum-item {
             background-color: var(--SmartThemeBgColor);
             border: 1px solid var(--SmartThemeBorderColor);
             border-radius: 8px;
             overflow: hidden;
-            position: relative; /* 覆盖层定位基准 */
+            position: relative;
             display: flex;
             flex-direction: column;
-            transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
-            /* 核心修改：移除固定高度，让内容撑开 */
-            height: auto; 
+            transition: all 0.2s;
+            /* 移除固定高度，防止挤压 */
+            height: auto;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
         .museum-item:hover {
             border-color: var(--SmartThemeQuoteColor);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+            z-index: 2;
         }
 
-        /* === 图片容器 (核心修改) === */
+        /* 顶部图片容器 (核心修改：使用纵横比) */
         .museum-thumb-container {
             width: 100%;
-            /* 关键：使用长宽比替代固定像素高度 */
-            /* 16/9 适合宽屏预览，也可改为 4/3 或 1/1 */
-            aspect-ratio: 16 / 9; 
+            /* 强制 2:3 比例，完美适配角色卡竖图，不再写死像素高度 */
+            aspect-ratio: 2 / 3; 
             flex-shrink: 0;
-            background-color: rgba(0,0,0,0.1);
+            background-color: rgba(0,0,0,0.05);
             position: relative;
             overflow: hidden;
+            border-bottom: 1px solid var(--SmartThemeBorderColor);
         }
 
         .museum-preview-img {
             width: 100%;
             height: 100%;
-            object-fit: cover; /* 保证填满且不变形 */
-            object-position: top center; /* 优先显示图片顶部（通常是脸） */
-            transition: transform 0.5s;
-            display: block;
+            object-fit: cover;
+            /* 角色卡重点通常在头部，所以靠上对齐 */
+            object-position: top center; 
+            transition: transform 0.5s ease-out;
         }
         .museum-item:hover .museum-preview-img {
-            transform: scale(1.05);
+            transform: scale(1.08);
         }
 
         .museum-type-tag {
             position: absolute;
-            top: 6px;
-            right: 6px;
+            top: 5px;
+            right: 5px;
             background: rgba(0,0,0,0.6);
             color: #fff;
             font-size: 10px;
@@ -121,19 +124,19 @@ function injectStyles() {
             pointer-events: none;
         }
 
-        /* === 底部信息区 === */
+        /* 底部信息区 */
         .museum-info {
-            padding: 10px;
+            padding: 8px 10px;
             display: flex;
             flex-direction: column;
             gap: 6px;
             background-color: var(--SmartThemeBgColor);
             z-index: 2;
-            flex-grow: 1; /* 确保高度对齐 */
+            flex-grow: 1; /* 填满剩余空间 */
         }
 
         .museum-title {
-            font-size: 0.95em;
+            font-size: 0.9em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
             white-space: nowrap;
@@ -145,8 +148,8 @@ function injectStyles() {
         /* 按钮组 */
         .museum-btn-group {
             display: flex;
-            gap: 6px;
-            margin-top: auto; /* 推到底部 */
+            gap: 5px;
+            margin-top: auto; /* 保证按钮永远在底部 */
             padding-top: 4px;
         }
 
@@ -154,10 +157,10 @@ function injectStyles() {
             background-color: var(--SmartThemeQuoteColor);
             color: var(--SmartThemeBodyColor);
             text-align: center;
-            padding: 6px 0;
+            padding: 5px 0;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 0.85em;
+            font-size: 0.8em;
             flex: 1;
             transition: opacity 0.2s;
             border: 1px solid transparent;
@@ -165,33 +168,38 @@ function injectStyles() {
             align-items: center;
             justify-content: center;
             gap: 4px;
-            font-weight: 600;
+            font-weight: 500;
         }
         .museum-action-btn:hover {
-            opacity: 0.8;
+            filter: brightness(1.1);
         }
+        
         .museum-action-btn.secondary {
             background-color: transparent;
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            flex: 0 0 32px; /* 稍微宽一点 */
+            flex: 0 0 28px; /* 小按钮宽度 */
         }
         .museum-action-btn.secondary:hover {
             border-color: var(--SmartThemeQuoteColor);
             color: var(--SmartThemeQuoteColor);
+            background-color: rgba(125, 125, 125, 0.1);
         }
 
         /* === 内部覆盖层 (详情/历史) === */
         .museum-card-overlay {
             position: absolute;
-            inset: 0; /* 填满整个 .museum-item */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
             background-color: var(--SmartThemeBgColor);
             z-index: 10;
             display: flex;
             flex-direction: column;
             transform: translateY(100%);
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            padding: 12px;
+            padding: 10px;
             box-sizing: border-box;
         }
         .museum-card-overlay.active {
@@ -208,113 +216,97 @@ function injectStyles() {
             flex-shrink: 0;
         }
         .museum-overlay-title {
-            font-size: 0.9em;
+            font-size: 0.85em;
             font-weight: bold;
             color: var(--SmartThemeBodyColor);
         }
         .museum-overlay-close {
             cursor: pointer;
-            padding: 4px;
-            opacity: 0.6;
+            padding: 2px 6px;
             font-size: 1.1em;
+            opacity: 0.6;
         }
-        .museum-overlay-close:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
+        .museum-overlay-close:hover { opacity: 1; }
 
         .museum-overlay-body {
             flex-grow: 1;
             overflow-y: auto;
-            font-size: 0.85em;
+            font-size: 0.8em;
             color: var(--SmartThemeBodyColor);
             scrollbar-width: thin;
             scrollbar-color: var(--SmartThemeQuoteColor) transparent;
-            padding-right: 2px;
         }
-        .museum-overlay-body::-webkit-scrollbar { width: 4px; }
+        .museum-overlay-body::-webkit-scrollbar { width: 3px; }
         .museum-overlay-body::-webkit-scrollbar-thumb { background: var(--SmartThemeQuoteColor); border-radius: 2px; }
 
         .museum-role-desc {
-            margin-bottom: 15px;
-            line-height: 1.5;
-            opacity: 0.9;
+            margin-bottom: 12px;
+            line-height: 1.4;
+            opacity: 0.85;
             white-space: pre-wrap;
-            background: rgba(0,0,0,0.03);
-            padding: 8px;
-            border-radius: 4px;
+            text-align: justify;
         }
 
         /* 迷你时间轴列表 */
         .museum-mini-timeline {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
         .museum-version-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px;
-            background: rgba(0,0,0,0.03);
+            padding: 5px;
+            background: rgba(125,125,125,0.05);
             border-radius: 4px;
             border: 1px solid var(--SmartThemeBorderColor);
-            transition: background 0.2s;
-        }
-        .museum-version-row:hover {
-            background: rgba(0,0,0,0.06);
         }
         .museum-version-info {
             display: flex;
             flex-direction: column;
-            gap: 2px;
-            overflow: hidden; /* 防止文字溢出 */
+            overflow: hidden;
         }
         .museum-v-date { font-weight: bold; font-size: 0.9em; }
-        .museum-v-note { 
-            font-size: 0.8em; 
-            opacity: 0.7; 
-            max-width: 140px; 
-            white-space: nowrap; 
-            overflow: hidden; 
-            text-overflow: ellipsis; 
-        }
+        .museum-v-note { font-size: 0.8em; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px;}
         
         .museum-v-btn {
             font-size: 0.8em;
-            padding: 4px 10px;
-            background: var(--SmartThemeBgColor);
+            padding: 2px 6px;
+            background: transparent;
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            border-radius: 4px;
+            border-radius: 3px;
             cursor: pointer;
-            flex-shrink: 0;
+            white-space: nowrap;
         }
         .museum-v-btn:hover {
             background: var(--SmartThemeQuoteColor);
             border-color: var(--SmartThemeQuoteColor);
-            color: var(--SmartThemeBodyColor);
+            color: #000;
         }
 
         /* 美化颜色点 */
         .museum-color-dots {
             display: flex;
-            gap: 6px;
+            gap: 4px;
             overflow-x: auto;
             padding-bottom: 4px;
-            margin-bottom: 4px;
-            min-height: 16px;
+            margin-bottom: 2px;
+            height: 18px; /* 固定高度防止跳动 */
+            align-items: center;
         }
         .color-dot {
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            border: 1px solid var(--SmartThemeBorderColor);
+            border: 1px solid rgba(128,128,128,0.3);
             cursor: pointer;
             flex-shrink: 0;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: transform 0.2s;
         }
-        .color-dot.active {
-            transform: scale(1.2);
-            box-shadow: 0 0 0 2px var(--SmartThemeBodyColor);
-        }
+        .color-dot:hover { transform: scale(1.2); }
+        .color-dot.active { transform: scale(1.3); border-color: var(--SmartThemeBodyColor); }
         
         /* 旋转动画 */
         .fa-spin { animation: fa-spin 2s infinite linear; }

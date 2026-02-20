@@ -44,25 +44,55 @@ const toast = {
 };
 
 // --- Supabase 逻辑 (保持不变，因为这部分没问题) ---
-
+// 增强版加载函数：自动重试多个源
 async function loadSupabase() {
     if (window.supabase) return;
     
-    console.log("[Museum] Loading Supabase SDK...");
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.8/dist/umd/supabase.min.js";
-        script.onload = () => {
-            console.log("[Museum] Supabase SDK Loaded.");
-            resolve();
-        };
-        script.onerror = (e) => {
-            console.error("[Museum] Failed to load Supabase SDK", e);
-            reject(e);
-        };
-        document.head.appendChild(script);
-    });
+    // 备选 CDN 列表 (优先尝试 unpkg，然后是 cloudflare，最后 jsdelivr)
+    const sources = [
+        "https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/supabase.js/2.39.7/supabase.min.js",
+        "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.8/dist/umd/supabase.min.js"
+    ];
+
+    console.log("[Museum] 正在加载 Supabase SDK...");
+
+    // 辅助函数：尝试加载单个脚本
+    const tryLoadScript = (url) => {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = url;
+            script.onload = () => {
+                console.log(`[Museum] 成功从 ${url} 加载 SDK`);
+                resolve();
+            };
+            script.onerror = () => {
+                console.warn(`[Museum] 无法加载: ${url}`);
+                document.head.removeChild(script); // 失败移除
+                reject();
+            };
+            document.head.appendChild(script);
+        });
+    };
+
+    // 顺序尝试列表中的 URL
+    for (const url of sources) {
+        try {
+            await tryLoadScript(url);
+            return; // 加载成功，直接返回
+        } catch (e) {
+            // 当前 URL 失败，继续尝试下一个
+            continue;
+        }
+    }
+
+    // 如果所有都失败了
+    const errorMsg = "[Museum] 错误：所有 CDN 源均无法连接，请检查网络代理或将 supabase.js 下载到本地。";
+    console.error(errorMsg);
+    if (window.toastr) window.toastr.error("无法加载 Supabase 组件，请检查控制台 (F12)");
+    throw new Error(errorMsg);
 }
+
 
 async function initSupabaseClient() {
     const settings = getExtensionSettings()[EXTENSION_NAME];

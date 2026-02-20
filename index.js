@@ -215,67 +215,31 @@ function renderItems(items) {
         // 构建颜色小圆点
         let colorDotsHtml = '';
         if (item.type === 'beautify' && variations.length > 0) {
-            colorDotsHtml = '<div class="museum-color-dots" style="display:flex; gap:6px; margin: 8px 0; flex-wrap: wrap;">';
+            colorDotsHtml = '<div class="museum-color-dots">';
             variations.forEach((v, idx) => {
-                // 圆点选中样式：使用 ST 的 QuoteColor 作为高亮边框
-                const activeClass = idx === 0 ? 'box-shadow: 0 0 0 2px var(--SmartThemeBgColor), 0 0 0 4px var(--SmartThemeQuoteColor); transform: scale(1.1);' : '';
+                const activeClass = idx === 0 ? 'active' : '';
                 colorDotsHtml += `
-                    <div class="color-dot" data-idx="${idx}" title="${v.name || '样式'}" 
-                         style="width: 14px; height: 14px; border-radius: 50%; background-color: ${v.color || '#ccc'}; cursor: pointer; transition: all 0.2s; border: 1px solid var(--SmartThemeBorderColor); ${activeClass}">
+                    <div class="color-dot ${activeClass}" data-idx="${idx}" title="${v.name || '样式'}" 
+                         style="background-color: ${v.color || '#ccc'};">
                     </div>
                 `;
             });
             colorDotsHtml += '</div>';
         }
 
-        // === 这里的样式全部换成了 CSS 变量 ===
+        // 使用纯 Class 的 HTML 模板，样式全靠上面的 CSS 文件控制
         const cardHtml = `
-            <div class="museum-item" data-id="${item.id}" style="
-                border: 1px solid var(--SmartThemeBorderColor); 
-                border-radius: 8px; 
-                overflow: hidden; 
-                background-color: rgba(0, 0, 0, 0.2); 
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                transition: transform 0.2s;
-            ">
-                <!-- 图片区域 -->
-                <div style="width:100%; aspect-ratio:9/16; max-height: 250px; background: rgba(0,0,0,0.3); overflow:hidden; display:flex; align-items:center; justify-content:center; position: relative;">
-                    <img class="museum-preview-img" src="${imgUrl}" style="width:100%; height:100%; object-fit:cover; transition: opacity 0.3s;" loading="lazy">
-                    
-                    <!-- 类型标签：半透明黑底白字，保持清晰 -->
-                    <div style="
-                        position: absolute; top: 8px; left: 8px; 
-                        background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px);
-                        color: #fff; 
-                        padding: 2px 8px; border-radius: 4px; font-size: 0.7em; letter-spacing: 1px;
-                    ">${typeLabel}</div>
+            <div class="museum-item" data-id="${item.id}">
+                <div class="museum-thumb-container">
+                    <img class="museum-preview-img" src="${imgUrl}" loading="lazy">
+                    <div class="museum-type-tag">${typeLabel}</div>
                 </div>
 
-                <!-- 信息区域 -->
-                <div class="museum-info" style="padding: 12px; color: var(--SmartThemeBodyColor);">
-                    
-                    <!-- 标题 -->
-                    <div class="museum-title" title="${title}" style="
-                        font-weight: bold; font-size: 1.1em; margin-bottom: 5px; 
-                        color: var(--SmartThemeBodyColor); 
-                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                        text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-                    ">${title}</div>
-                    
+                <div class="museum-info">
+                    <div class="museum-title" title="${title}">${title}</div>
                     ${colorDotsHtml}
-
-                    <div class="museum-selected-idx" data-idx="0" style="display:none;"></div>
-
-                    <!-- 导入按钮：使用主题强调色 (QuoteColor) -->
-                    <div class="museum-action-btn import-btn" style="
-                        margin-top: 10px; 
-                        background-color: var(--SmartThemeQuoteColor); 
-                        color: var(--SmartThemeBgColor); 
-                        filter: brightness(1.1);
-                        border: 1px solid var(--SmartThemeBorderColor);
-                        padding: 8px; text-align: center; border-radius: 4px; cursor: pointer; font-size: 0.9em; font-weight: bold;
-                        transition: filter 0.2s;
-                    " onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1.1)'">
+                    <div class="museum-selected-idx" data-idx="0"></div>
+                    <div class="museum-action-btn import-btn">
                         <i class="fa-solid fa-download"></i> 导入
                     </div>
                 </div>

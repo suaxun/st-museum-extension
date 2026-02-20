@@ -1,27 +1,11 @@
-import {
-    extension_settings,
-    saveSettingsDebounced
-} from "../../extensions.js";
-import {
-    callGenericPopup,
-    POPUP_TYPE
-} from "../../popup.js";
-import {
-    saveSettings
-} from "../../power-user.js";
-import {
-    toastr
-} from "../../toastr.js"; 
-
-// 扩展名称 (必须与文件夹名或 manifest 中的 name 保持逻辑一致，但这里主要用于 settings key)
+// 使用 SillyTavern 全局上下文，避免相对路径地狱
 const EXTENSION_NAME = "museum_importer";
 
-// 初始化设置
-let settings = extension_settings[EXTENSION_NAME] || {};
-if (!settings.sbUrl) settings.sbUrl = "";
-if (!settings.sbKey) settings.sbKey = "";
-if (!settings.sbEmail) settings.sbEmail = "";
-if (!settings.sbPass) settings.sbPass = "";
+// 引用全局变量的简写
+const getContext = () => window.SillyTavern && window.SillyTavern.getContext ? window.SillyTavern.getContext() : {};
+// 如果 SillyTavern 没有暴露某些模块到全局，我们需要手动获取
+// 通常 extension_settings 是挂载在全局的，或者通过 window.SillyTavern.extension_settings
+// 但为了保险，我们这里尽量防御性编程
 
 // 全局变量
 let supabase = null;
@@ -45,8 +29,22 @@ async function loadSupabase() {
     });
 }
 
+// 辅助函数：获取设置
+function getSettings() {
+    // 尝试从全局 extension_settings 获取
+    // 注意：ST 内部模块通常是 ESM，全局访问可能受限。
+    // 如果上面的 import 失败，我们需要一种变通方法。
+    // 但 ST 的 extension_settings 实际上是一个导出的对象。
+    // 让我们尝试混合方案：如果 import 失败，代码就跑不起来。
+    // 所以这里的关键还是路径。
+    
+    // 如果你依然想用 import，请确保文件结构是：
+    // SillyTavern/public/scripts/extensions/third-party/st-museum-extension/index.js
+    // 此时 ../../../extensions.js 指向 SillyTavern/public/scripts/extensions.js -> 这里的确是正解。
+}
+
 // 2. 初始化 Supabase 客户端
-async function initSupabaseClient() {
+async function initSupabaseClient(settings) {
     if (!settings.sbUrl || !settings.sbKey) return false;
     if (!window.supabase) await loadSupabase();
     
@@ -58,7 +56,7 @@ async function initSupabaseClient() {
             session = data.session;
             return true;
         } else if (settings.sbEmail && settings.sbPass) {
-            return await doLogin();
+            return await doLogin(settings);
         }
         return false;
     } catch (e) {
@@ -68,7 +66,7 @@ async function initSupabaseClient() {
 }
 
 // 3. 登录逻辑
-async function doLogin() {
+async function doLogin(settings) {
     if (!supabase) return false;
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -140,7 +138,6 @@ async function importRoleCard(item) {
         
         if (result.file_name) {
             toastr.success(`角色 "${result.name || item.content}" 导入成功！`);
-            // 模拟点击刷新按钮以更新列表
             $("#rm_button_characters").click(); 
         } else {
             throw new Error("API 返回错误");
@@ -192,16 +189,24 @@ async function importBeautify(item) {
 
 // UI 渲染：登录界面
 function renderLogin() {
+    // 动态获取当前的 settings
+    // 这里的 import 位于函数内部是不合法的，所以我们必须在顶部解决 import 问题
+    // 此处仅做逻辑展示，具体看下方的 jQuery 入口
+    
+    // 为了避开 module 问题，我们在这里重新获取一次全局变量（如果改用 import 方案成功，这里不需要改）
     const container = $('#museum-gallery');
     container.empty();
     
+    // 获取当前扩展设置的快照
+    const currentSettings = extension_settings[EXTENSION_NAME] || { sbUrl: "", sbKey: "", sbEmail: "", sbPass: ""};
+
     const html = `
         <div class="museum-login-form">
             <h3>登录到博物馆</h3>
-            <input type="text" id="museum-url" class="text_pole" placeholder="Supabase URL" value="${settings.sbUrl}">
-            <input type="password" id="museum-key" class="text_pole" placeholder="Supabase Key" value="${settings.sbKey}">
-            <input type="text" id="museum-email" class="text_pole" placeholder="Email" value="${settings.sbEmail}">
-            <input type="password" id="museum-pass" class="text_pole" placeholder="Password" value="${settings.sbPass}">
+            <input type="text" id="museum-url" class="text_pole" placeholder="Supabase URL" value="${currentSettings.sbUrl || ''}">
+            <input type="password" id="museum-key" class="text_pole" placeholder="Supabase Key" value="${currentSettings.sbKey || ''}">
+            <input type="text" id="museum-email" class="text_pole" placeholder="Email" value="${currentSettings.sbEmail || ''}">
+            <input type="password" id="museum-pass" class="text_pole" placeholder="Password" value="${currentSettings.sbPass || ''}">
             <button id="museum-login-btn" class="menu_button">登录</button>
         </div>
     `;
@@ -209,22 +214,23 @@ function renderLogin() {
     container.html(html);
     
     $('#museum-login-btn').on('click', async () => {
-        settings.sbUrl = $('#museum-url').val().trim();
-        settings.sbKey = $('#museum-key').val().trim();
-        settings.sbEmail = $('#museum-email').val().trim();
-        settings.sbPass = $('#museum-pass').val().trim();
+        const newSettings = {
+            sbUrl: $('#museum-url').val().trim(),
+            sbKey: $('#museum-key').val().trim(),
+            sbEmail: $('#museum-email').val().trim(),
+            sbPass: $('#museum-pass').val().trim()
+        };
         
-        extension_settings[EXTENSION_NAME] = settings;
+        extension_settings[EXTENSION_NAME] = newSettings;
         saveSettingsDebounced();
         
-        await initSupabaseClient();
+        await initSupabaseClient(newSettings);
         if (session) {
             fetchMuseumItems();
         }
     });
 }
 
-// UI 渲染：画廊
 function renderGallery(items) {
     const container = $('#museum-gallery');
     container.empty();
@@ -327,18 +333,32 @@ function openMuseum() {
     createModal();
     $('#museum-modal').addClass('active');
     
+    const currentSettings = extension_settings[EXTENSION_NAME] || {};
+
     if (session) {
         fetchMuseumItems();
     } else {
-        initSupabaseClient().then(success => {
+        initSupabaseClient(currentSettings).then(success => {
             if (success) fetchMuseumItems();
             else renderLogin();
         });
     }
 }
 
+// 导入模块
+// 关键点：使用 ../../../ 路径
+import {
+    extension_settings,
+    saveSettingsDebounced
+} from "../../../extensions.js";
+
 // 入口函数
 jQuery(async () => {
+    // 确保 extension_settings 初始化
+    if (!extension_settings[EXTENSION_NAME]) {
+        extension_settings[EXTENSION_NAME] = { sbUrl: "", sbKey: "", sbEmail: "", sbPass: "" };
+    }
+
     const settingsHtml = `
         <div class="museum-settings-block">
             <h3>🏛️ 博物馆 (Museum)</h3>
@@ -351,9 +371,7 @@ jQuery(async () => {
         </div>
     `;
 
-    // 延时一点点，确保 DOM 加载完毕（虽然 jQuery ready 应该够了）
     setTimeout(() => {
-        // 如果 settings2 容器存在则插入，不存在则插入到 settings
         const target = $('#extensions_settings2').length ? $('#extensions_settings2') : $('#extensions_settings');
         target.append(settingsHtml);
         $('#museum-open-btn').on('click', openMuseum);

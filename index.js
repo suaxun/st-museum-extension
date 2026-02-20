@@ -42,15 +42,15 @@ const toast = {
     warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn("[Museum] " + msg)
 };
 
-// --- 样式注入 ---
+// --- 样式注入 (修复PC端布局挤压问题) ---
 function injectStyles() {
     if ($('#museum-extension-styles').length) return;
 
     const css = `
-        /* === 网格布局 (PC 2列 / 移动端 3列) === */
+        /* === 网格布局 === */
         .museum-grid {
             display: grid;
-            gap: 10px;
+            gap: 12px;
             padding: 10px 0;
             width: 100%;
             /* 移动端默认 3 列 */
@@ -59,7 +59,7 @@ function injectStyles() {
 
         @media (min-width: 800px) {
             .museum-grid {
-                /* PC端 2 列 */
+                /* PC端 2 列，让卡片有足够展示空间 */
                 grid-template-columns: repeat(2, 1fr);
             }
         }
@@ -70,20 +70,25 @@ function injectStyles() {
             border: 1px solid var(--SmartThemeBorderColor);
             border-radius: 8px;
             overflow: hidden;
-            position: relative; /* 用于绝对定位内部覆盖层 */
+            position: relative; /* 覆盖层定位基准 */
             display: flex;
             flex-direction: column;
-            transition: border-color 0.2s;
-            height: 320px; /* 固定高度，确保对齐 */
+            transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+            /* 核心修改：移除固定高度，让内容撑开 */
+            height: auto; 
         }
         .museum-item:hover {
             border-color: var(--SmartThemeQuoteColor);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
 
-        /* 顶部图片容器 */
+        /* === 图片容器 (核心修改) === */
         .museum-thumb-container {
             width: 100%;
-            height: 200px; /* 固定图片高度 */
+            /* 关键：使用长宽比替代固定像素高度 */
+            /* 16/9 适合宽屏预览，也可改为 4/3 或 1/1 */
+            aspect-ratio: 16 / 9; 
             flex-shrink: 0;
             background-color: rgba(0,0,0,0.1);
             position: relative;
@@ -93,9 +98,10 @@ function injectStyles() {
         .museum-preview-img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            object-position: top;
+            object-fit: cover; /* 保证填满且不变形 */
+            object-position: top center; /* 优先显示图片顶部（通常是脸） */
             transition: transform 0.5s;
+            display: block;
         }
         .museum-item:hover .museum-preview-img {
             transform: scale(1.05);
@@ -103,8 +109,8 @@ function injectStyles() {
 
         .museum-type-tag {
             position: absolute;
-            top: 4px;
-            right: 4px;
+            top: 6px;
+            right: 6px;
             background: rgba(0,0,0,0.6);
             color: #fff;
             font-size: 10px;
@@ -112,18 +118,18 @@ function injectStyles() {
             border-radius: 4px;
             backdrop-filter: blur(2px);
             z-index: 2;
+            pointer-events: none;
         }
 
-        /* 底部信息区 */
+        /* === 底部信息区 === */
         .museum-info {
             padding: 10px;
             display: flex;
             flex-direction: column;
-            flex-grow: 1;
-            justify-content: space-between;
-            gap: 5px;
+            gap: 6px;
             background-color: var(--SmartThemeBgColor);
             z-index: 2;
+            flex-grow: 1; /* 确保高度对齐 */
         }
 
         .museum-title {
@@ -133,13 +139,15 @@ function injectStyles() {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            line-height: 1.2;
         }
 
         /* 按钮组 */
         .museum-btn-group {
             display: flex;
-            gap: 5px;
-            margin-top: auto;
+            gap: 6px;
+            margin-top: auto; /* 推到底部 */
+            padding-top: 4px;
         }
 
         .museum-action-btn {
@@ -157,6 +165,7 @@ function injectStyles() {
             align-items: center;
             justify-content: center;
             gap: 4px;
+            font-weight: 600;
         }
         .museum-action-btn:hover {
             opacity: 0.8;
@@ -165,7 +174,7 @@ function injectStyles() {
             background-color: transparent;
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            flex: 0 0 30px; /* 小按钮 */
+            flex: 0 0 32px; /* 稍微宽一点 */
         }
         .museum-action-btn.secondary:hover {
             border-color: var(--SmartThemeQuoteColor);
@@ -175,24 +184,20 @@ function injectStyles() {
         /* === 内部覆盖层 (详情/历史) === */
         .museum-card-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            inset: 0; /* 填满整个 .museum-item */
             background-color: var(--SmartThemeBgColor);
             z-index: 10;
             display: flex;
             flex-direction: column;
             transform: translateY(100%);
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            padding: 10px;
+            padding: 12px;
             box-sizing: border-box;
         }
         .museum-card-overlay.active {
             transform: translateY(0);
         }
 
-        /* 覆盖层头部 */
         .museum-overlay-header {
             display: flex;
             justify-content: space-between;
@@ -211,10 +216,10 @@ function injectStyles() {
             cursor: pointer;
             padding: 4px;
             opacity: 0.6;
+            font-size: 1.1em;
         }
-        .museum-overlay-close:hover { opacity: 1; }
+        .museum-overlay-close:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
 
-        /* 覆盖层内容滚动区 */
         .museum-overlay-body {
             flex-grow: 1;
             overflow-y: auto;
@@ -222,16 +227,19 @@ function injectStyles() {
             color: var(--SmartThemeBodyColor);
             scrollbar-width: thin;
             scrollbar-color: var(--SmartThemeQuoteColor) transparent;
+            padding-right: 2px;
         }
         .museum-overlay-body::-webkit-scrollbar { width: 4px; }
         .museum-overlay-body::-webkit-scrollbar-thumb { background: var(--SmartThemeQuoteColor); border-radius: 2px; }
 
-        /* 角色简介 */
         .museum-role-desc {
             margin-bottom: 15px;
-            line-height: 1.4;
+            line-height: 1.5;
             opacity: 0.9;
             white-space: pre-wrap;
+            background: rgba(0,0,0,0.03);
+            padding: 8px;
+            border-radius: 4px;
         }
 
         /* 迷你时间轴列表 */
@@ -244,48 +252,68 @@ function injectStyles() {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 6px;
-            background: rgba(0,0,0,0.05);
+            padding: 8px;
+            background: rgba(0,0,0,0.03);
             border-radius: 4px;
             border: 1px solid var(--SmartThemeBorderColor);
+            transition: background 0.2s;
+        }
+        .museum-version-row:hover {
+            background: rgba(0,0,0,0.06);
         }
         .museum-version-info {
             display: flex;
             flex-direction: column;
+            gap: 2px;
+            overflow: hidden; /* 防止文字溢出 */
         }
         .museum-v-date { font-weight: bold; font-size: 0.9em; }
-        .museum-v-note { font-size: 0.8em; opacity: 0.7; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .museum-v-note { 
+            font-size: 0.8em; 
+            opacity: 0.7; 
+            max-width: 140px; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+        }
         
         .museum-v-btn {
             font-size: 0.8em;
-            padding: 3px 8px;
-            background: transparent;
+            padding: 4px 10px;
+            background: var(--SmartThemeBgColor);
             border: 1px solid var(--SmartThemeBorderColor);
             color: var(--SmartThemeBodyColor);
-            border-radius: 3px;
+            border-radius: 4px;
             cursor: pointer;
+            flex-shrink: 0;
         }
         .museum-v-btn:hover {
             background: var(--SmartThemeQuoteColor);
             border-color: var(--SmartThemeQuoteColor);
-            color: #000;
+            color: var(--SmartThemeBodyColor);
         }
 
         /* 美化颜色点 */
         .museum-color-dots {
             display: flex;
-            gap: 4px;
+            gap: 6px;
             overflow-x: auto;
             padding-bottom: 4px;
             margin-bottom: 4px;
+            min-height: 16px;
         }
         .color-dot {
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.3);
+            border: 1px solid var(--SmartThemeBorderColor);
             cursor: pointer;
             flex-shrink: 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .color-dot.active {
+            transform: scale(1.2);
+            box-shadow: 0 0 0 2px var(--SmartThemeBodyColor);
         }
         
         /* 旋转动画 */

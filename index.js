@@ -1,31 +1,24 @@
-import {
-    extension_settings,
-    saveSettingsDebounced
-} from "../../../extensions.js";
-import {
-    saveSettings
-} from "../../../power-user.js";
-import {
-    toastr
-} from "../../../toastr.js";
-
+// 扩展名称
 const EXTENSION_NAME = "museum_importer";
 
-// 获取设置
-let settings = extension_settings[EXTENSION_NAME] || {};
-// 默认值
-settings.sbUrl = settings.sbUrl || "";
-settings.sbKey = settings.sbKey || "";
-settings.sbEmail = settings.sbEmail || "";
-settings.sbPass = settings.sbPass || "";
-
-// 全局变量
+// 全局变量引用
 let supabase = null;
 let session = null;
-let currentFilter = 'all'; // all, role_card, beautify
+let currentFilter = 'all'; 
 
-// --- Supabase 逻辑 ---
+// 从全局获取 SillyTavern 的核心功能
+const getContext = () => window.SillyTavern.getContext();
+const { extension_settings, saveSettingsDebounced } = window.SillyTavern.libs ? window.SillyTavern : window;
 
+// 辅助函数：获取 Toaster (通知提示)
+const toast = {
+    success: (msg) => window.toastr ? window.toastr.success(msg) : console.log(msg),
+    error: (msg) => window.toastr ? window.toastr.error(msg) : console.error(msg),
+    info: (msg) => window.toastr ? window.toastr.info(msg) : console.log(msg),
+    warning: (msg) => window.toastr ? window.toastr.warning(msg) : console.warn(msg)
+};
+
+// 1. 动态加载 Supabase SDK
 async function loadSupabase() {
     if (window.supabase) return;
     return new Promise((resolve, reject) => {
@@ -37,8 +30,11 @@ async function loadSupabase() {
     });
 }
 
+// 2. 初始化 Supabase
 async function initSupabaseClient() {
+    const settings = extension_settings[EXTENSION_NAME];
     if (!settings.sbUrl || !settings.sbKey) return false;
+    
     if (!window.supabase) await loadSupabase();
 
     try {
@@ -52,25 +48,31 @@ async function initSupabaseClient() {
         }
         return false;
     } catch (e) {
-        console.error("Museum Supabase init error:", e);
+        console.error("[Museum] Init failed:", e);
         return false;
     }
 }
 
+// 3. 登录
 async function doLogin() {
     if (!supabase) return false;
-    const { data, error } = await supabase.auth.signInWithPassword({
-        email: settings.sbEmail,
-        password: settings.sbPass
-    });
-    if (error) throw error;
-    session = data.session;
-    toastr.success("博物馆登录成功");
-    return true;
+    const settings = extension_settings[EXTENSION_NAME];
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: settings.sbEmail,
+            password: settings.sbPass
+        });
+        if (error) throw error;
+        session = data.session;
+        toast.success("博物馆登录成功");
+        return true;
+    } catch (e) {
+        toast.error("登录失败: " + e.message);
+        return false;
+    }
 }
 
-// --- 数据获取与渲染逻辑 ---
-
+// 4. 获取数据并渲染
 async function refreshGallery() {
     const grid = $('#museum-grid');
     grid.empty();
@@ -78,7 +80,7 @@ async function refreshGallery() {
 
     if (!supabase) await initSupabaseClient();
     if (!session) {
-        grid.html('<div style="text-align:center; padding:20px;">请先在上方设置中登录</div>');
+        grid.html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">请点击上方齿轮图标<br>配置 Supabase 并登录</div>');
         return;
     }
 
@@ -96,7 +98,7 @@ async function refreshGallery() {
 
         renderItems(data || []);
     } catch (e) {
-        toastr.error("获取数据失败: " + e.message);
+        toast.error("获取数据失败: " + e.message);
         grid.html('<div style="text-align:center; padding:20px;">加载失败</div>');
     }
 }
@@ -106,7 +108,7 @@ function renderItems(items) {
     grid.empty();
 
     if (items.length === 0) {
-        grid.html('<div style="text-align:center; padding:20px;">空空如也</div>');
+        grid.html('<div style="text-align:center; padding:20px;">暂无内容</div>');
         return;
     }
 
@@ -115,9 +117,9 @@ function renderItems(items) {
         let typeLabel = "未知";
         let imgUrl = "";
         
-        // 解析数据结构 (兼容你的旧版 Vue 逻辑)
+        // 解析数据逻辑
         if (item.type === 'role_card') {
-            typeLabel = "角色卡";
+            typeLabel = "角色";
             try {
                 if (item.content.startsWith('{')) {
                     const json = JSON.parse(item.content);
@@ -139,10 +141,12 @@ function renderItems(items) {
             } catch (e) { }
         }
 
-        // 构建卡片 HTML
+        // HTML 模板
         const cardHtml = `
             <div class="museum-item" data-id="${item.id}">
-                <img src="${imgUrl}" class="museum-thumb" loading="lazy">
+                <div style="width:100%; aspect-ratio:2/3; background:#000; overflow:hidden;">
+                    <img src="${imgUrl}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">
+                </div>
                 <div class="museum-info">
                     <div class="museum-type-tag">${typeLabel}</div>
                     <div class="museum-title" title="${title}">${title}</div>
@@ -154,16 +158,12 @@ function renderItems(items) {
         `;
         
         const $card = $(cardHtml);
-        
-        // 绑定点击事件
         $card.find('.import-btn').on('click', () => handleImport(item));
-        
         grid.append($card);
     });
 }
 
-// --- 核心导入功能 ---
-
+// 5. 导入逻辑
 async function handleImport(item) {
     if (item.type === 'role_card') {
         await importRoleCard(item);
@@ -185,18 +185,19 @@ async function importRoleCard(item) {
         const formData = new FormData();
         formData.append('avatar', file);
 
+        // 调用 SillyTavern 的后端 API
         const res = await fetch('/api/characters/import', { method: 'POST', body: formData });
         const result = await res.json();
 
         if (result.file_name) {
-            toastr.success(`角色 ${result.name} 已导入！`);
-            // 刷新 ST 角色列表 (触发点击刷新按钮)
+            toast.success(`角色 "${result.name}" 导入成功！`);
+            // 触发 ST 刷新角色列表
             $("#rm_button_characters").click();
         } else {
-            throw new Error("导入API无响应");
+            throw new Error("API 返回错误");
         }
     } catch (e) {
-        toastr.error("导入角色失败: " + e.message);
+        toast.error("角色导入失败: " + e.message);
     } finally {
         btn.html(originalText);
     }
@@ -216,107 +217,90 @@ async function importBeautify(item) {
             }
         } catch(e) {}
 
-        if (!cssUrl) throw new Error("未找到 CSS 链接");
+        if (!cssUrl) throw new Error("未找到 CSS 文件链接");
 
         const res = await fetch(cssUrl);
         const cssText = await res.text();
 
         if (!cssText) throw new Error("CSS 内容为空");
 
-        // 写入到 ST 的 Custom CSS 输入框
+        // 写入 ST 的 Custom CSS 编辑框
         const textArea = document.getElementById('customCSS');
         if (textArea) {
             textArea.value = cssText;
-            // 触发 input 事件以确保 ST 保存设置
             textArea.dispatchEvent(new Event('input', { bubbles: true }));
-            // 确保设置已保存
-            saveSettings();
-            toastr.success(`主题应用成功！CSS 已替换。`);
+            // 触发保存
+            const { saveSettings } = window.SillyTavern.libs ? window.SillyTavern : window;
+            if (saveSettings) saveSettings();
+            toast.success(`主题应用成功！`);
         } else {
-            toastr.warning("未找到 Custom CSS 输入框，请确保处于用户设置界面。");
+            toast.warning("找不到 CSS 输入框，请确保位于用户设置界面");
         }
-
     } catch (e) {
-        toastr.error("导入美化失败: " + e.message);
+        toast.error("美化导入失败: " + e.message);
     } finally {
         btn.html(originalText);
     }
 }
 
-// --- 界面构建 ---
-
+// 6. UI 构建函数
 function buildExtensionUI() {
-    // 防止重复插入
+    // 避免重复创建
     if ($('#museum-extension-root').length) return;
 
-    // 构建 HTML 结构
+    // 获取当前设置用于回填
+    const settings = extension_settings[EXTENSION_NAME];
+
     const html = `
     <div id="museum-extension-root" class="inline-drawer wide100p flexFlowColumn">
-        <!-- 抽屉头部 -->
         <div class="inline-drawer-toggle inline-drawer-header">
             <b><i class="fa-solid fa-building-columns"></i> 博物馆 (Museum)</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
 
-        <!-- 抽屉内容 -->
         <div class="inline-drawer-content museum-drawer-content">
-            
-            <!-- 1. 顶部操作栏 -->
             <div class="flex-container">
-                <div class="menu_button fa-solid fa-arrows-rotate" id="museum-refresh-btn" title="刷新画廊"></div>
-                <div class="menu_button fa-solid fa-gear" id="museum-config-toggle" title="配置连接"></div>
+                <div class="menu_button fa-solid fa-arrows-rotate" id="museum-refresh-btn" title="刷新"></div>
+                <div class="menu_button fa-solid fa-gear" id="museum-config-toggle" title="设置"></div>
             </div>
 
-            <!-- 2. 配置/登录面板 (默认隐藏) -->
             <div id="museum-auth-panel" class="museum-auth-box" style="display:none;">
-                <small>Supabase 配置</small>
-                <input type="text" id="museum-sb-url" class="text_pole textarea_compact" placeholder="Supabase URL" value="${settings.sbUrl}">
-                <input type="password" id="museum-sb-key" class="text_pole textarea_compact" placeholder="Supabase Key" value="${settings.sbKey}">
-                <input type="text" id="museum-email" class="text_pole textarea_compact" placeholder="Email" value="${settings.sbEmail}">
-                <input type="password" id="museum-pass" class="text_pole textarea_compact" placeholder="Password" value="${settings.sbPass}">
-                <button id="museum-save-login-btn" class="menu_button">保存并登录</button>
+                <small>Supabase 连接配置</small>
+                <input type="text" id="museum-sb-url" class="text_pole" placeholder="URL" value="${settings.sbUrl || ''}">
+                <input type="password" id="museum-sb-key" class="text_pole" placeholder="Key" value="${settings.sbKey || ''}">
+                <input type="text" id="museum-email" class="text_pole" placeholder="Email" value="${settings.sbEmail || ''}">
+                <input type="password" id="museum-pass" class="text_pole" placeholder="Password" value="${settings.sbPass || ''}">
+                <button id="museum-save-btn" class="menu_button">保存并登录</button>
             </div>
 
-            <!-- 3. 类型过滤器 -->
             <div class="museum-filter-bar">
                 <div class="museum-filter-btn active" data-filter="all">全部</div>
                 <div class="museum-filter-btn" data-filter="role_card">角色</div>
                 <div class="museum-filter-btn" data-filter="beautify">美化</div>
             </div>
 
-            <!-- 4. 内容网格 -->
             <div id="museum-grid" class="museum-grid">
-                <div style="grid-column: 1 / -1; text-align: center; padding: 20px; opacity: 0.5;">
-                    点击上方刷新按钮加载数据
+                <div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.5">
+                    点击上方刷新按钮
                 </div>
             </div>
-
         </div>
     </div>
     `;
 
-    // 插入到扩展面板 (#extensions_settings2 通常是右边那一栏，或者插到第一个栏)
-    const targetContainer = $('#extensions_settings2').length ? $('#extensions_settings2') : $('#extensions_settings');
-    targetContainer.append(html);
+    $('#extensions_settings2').append(html);
 
-    // --- 绑定事件 ---
-
-    // 1. 折叠/展开 配置面板
-    $('#museum-config-toggle').on('click', () => {
-        $('#museum-auth-panel').slideToggle();
-    });
-
-    // 2. 保存并登录
-    $('#museum-save-login-btn').on('click', async () => {
+    // 事件绑定
+    $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
+    
+    $('#museum-save-btn').on('click', async () => {
         settings.sbUrl = $('#museum-sb-url').val().trim();
         settings.sbKey = $('#museum-sb-key').val().trim();
         settings.sbEmail = $('#museum-email').val().trim();
         settings.sbPass = $('#museum-pass').val().trim();
-
-        // 保存到 ST 的扩展设置
-        extension_settings[EXTENSION_NAME] = settings;
+        
         saveSettingsDebounced();
-
+        
         const success = await initSupabaseClient();
         if (success) {
             $('#museum-auth-panel').slideUp();
@@ -324,7 +308,6 @@ function buildExtensionUI() {
         }
     });
 
-    // 3. 过滤器切换
     $('.museum-filter-btn').on('click', function() {
         $('.museum-filter-btn').removeClass('active');
         $(this).addClass('active');
@@ -332,12 +315,9 @@ function buildExtensionUI() {
         refreshGallery();
     });
 
-    // 4. 刷新按钮
-    $('#museum-refresh-btn').on('click', () => {
-        refreshGallery();
-    });
+    $('#museum-refresh-btn').on('click', refreshGallery);
 
-    // 自动尝试加载
+    // 自动加载尝试
     if (settings.sbUrl && settings.sbKey) {
         initSupabaseClient().then(() => {
             if (session) refreshGallery();
@@ -345,16 +325,18 @@ function buildExtensionUI() {
     }
 }
 
-// 入口函数
+// 7. 扩展加载入口
 jQuery(async () => {
-    // 确保 extension_settings 初始化
+    // 初始化默认设置结构
     if (!extension_settings[EXTENSION_NAME]) {
-        extension_settings[EXTENSION_NAME] = { sbUrl: "", sbKey: "", sbEmail: "", sbPass: "" };
+        extension_settings[EXTENSION_NAME] = {
+            sbUrl: "", sbKey: "", sbEmail: "", sbPass: ""
+        };
     }
 
     // 预加载库
     loadSupabase();
 
-    // 延迟一点加载 UI，确保 ST 的 DOM 已经就绪
-    setTimeout(buildExtensionUI, 800);
+    // 等待 DOM 完全就绪
+    setTimeout(buildExtensionUI, 1000);
 });

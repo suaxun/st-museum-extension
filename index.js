@@ -277,26 +277,46 @@ async function handleImport(item, $card) {
 // === 核心功能：角色卡导入逻辑（弹窗+时间轴） ===
 
 async function importRoleCard(item) {
-    // 1. 注入 CSS 样式（包含移动端适配）
+    // 1. 注入 CSS 样式（包含强力移动端适配）
     if (!$('#museum-role-styles').length) {
         $('head').append(`
             <style id="museum-role-styles">
-                /* 通用样式 */
+                /* 遮罩层：最高层级，防止被 ST 界面遮挡 */
+                .museum-modal-overlay { 
+                    position: fixed; 
+                    top: 0; 
+                    left: 0; 
+                    width: 100%; 
+                    height: 100%; 
+                    background: rgba(0,0,0,0.8); 
+                    backdrop-filter: blur(5px); 
+                    z-index: 99999; 
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center;
+                    padding: 20px; 
+                    box-sizing: border-box; 
+                }
+
+                /* 弹窗容器 */
                 .museum-modal-content {
                     background: var(--SmartThemeBgColor, #1a1b26);
                     color: var(--SmartThemeBodyColor, #fff);
-                    padding: 0; /* 移除内边距，交给内部容器管理 */
+                    padding: 0;
                     border-radius: 12px;
-                    width: 90%;
+                    width: 100%;
                     max-width: 600px;
-                    max-height: 90vh; /* 限制最大高度，防止超出一屏 */
+                    /* 关键修复：高度限制逻辑 */
+                    height: auto;
+                    max-height: 90vh; /* 绝不超过屏幕 90% */
+                    display: flex;
+                    flex-direction: column;
                     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
                     border: 1px solid var(--SmartThemeBorderColor, #333);
-                    display: flex;
-                    flex-direction: column; /* 弹性垂直布局 */
-                    overflow: hidden; /* 防止圆角溢出 */
+                    overflow: hidden;
                 }
 
+                /* 顶部标题栏：固定不滚动 */
                 .museum-modal-header {
                     padding: 15px;
                     background: rgba(0,0,0,0.2);
@@ -304,13 +324,18 @@ async function importRoleCard(item) {
                     justify-content: space-between;
                     align-items: center;
                     border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
-                    flex-shrink: 0; /* 头部不压缩 */
+                    flex-shrink: 0;
                 }
 
+                .museum-modal-title { font-weight: bold; font-size: 1.1em; }
+                .museum-modal-close-icon { background: none; border: none; color: inherit; font-size: 1.5em; cursor: pointer; opacity: 0.7; padding: 0 10px;}
+
+                /* 内容区域：可滚动 */
                 .museum-modal-body {
                     padding: 20px;
-                    overflow-y: auto; /* 只有内容区域滚动 */
-                    flex-grow: 1; /* 占据剩余空间 */
+                    overflow-y: auto; /* 核心：让内部滚动 */
+                    -webkit-overflow-scrolling: touch; /* iOS 流畅滚动 */
+                    flex-grow: 1;
                 }
 
                 /* 角色布局容器 */
@@ -339,7 +364,7 @@ async function importRoleCard(item) {
                     flex-grow: 1;
                     display: flex;
                     flex-direction: column;
-                    min-width: 0; /* 防止文本撑开 flex */
+                    min-width: 0;
                 }
 
                 .museum-role-desc { 
@@ -358,7 +383,6 @@ async function importRoleCard(item) {
                 .museum-timeline {
                     position: relative;
                     padding-left: 20px;
-                    /* max-height 移除，交给外层 flex 容器滚动 */
                 }
                 .museum-timeline::before {
                     content: '';
@@ -394,7 +418,7 @@ async function importRoleCard(item) {
                     justify-content: space-between;
                     align-items: center;
                     margin-bottom: 5px;
-                    flex-wrap: wrap; /* 允许小屏幕换行 */
+                    flex-wrap: wrap; 
                     gap: 5px;
                 }
                 .museum-version-date { font-weight: bold; font-size: 0.9em; }
@@ -417,25 +441,32 @@ async function importRoleCard(item) {
                     border-color: var(--SmartThemeQuoteColor, #9abdf5);
                 }
 
-                /* === 移动端适配 (核心修改) === */
+                /* === 移动端强力适配 === */
                 @media (max-width: 768px) {
+                    .museum-modal-overlay {
+                        align-items: flex-start; /* 改为顶部对齐，防止高度过高时顶部被切 */
+                        padding-top: calc(env(safe-area-inset-top) + 20px); /* 避开刘海 */
+                        padding-bottom: 20px;
+                    }
+
                     .museum-modal-content {
-                        width: 95%; /* 手机上更宽一点 */
-                        max-height: 85vh; /* 留出浏览器工具栏空间 */
+                        max-height: calc(100vh - 40px); /* 留出边距 */
                     }
                     
                     /* 布局改为上下结构 */
                     .museum-role-layout {
                         flex-direction: column;
                         gap: 15px;
+                        margin-bottom: 15px;
                     }
 
-                    /* 图片变成横幅样式，节省垂直空间 */
+                    /* 图片容器变为横幅模式 */
                     .museum-role-img-container {
                         width: 100%;
-                        height: 120px; /* 固定高度 */
+                        height: 120px; 
                         overflow: hidden;
                         border-radius: 8px;
+                        margin: 0 auto;
                     }
 
                     .museum-role-img {
@@ -447,8 +478,16 @@ async function importRoleCard(item) {
                     }
 
                     .museum-role-desc {
-                        max-height: 120px; /* 稍微减小描述高度，给时间轴留空间 */
+                        max-height: 100px; /* 减小描述高度 */
+                        font-size: 0.85em;
+                        padding: 10px;
                     }
+                    
+                    .museum-modal-header {
+                        padding: 10px 15px; /* 减小内边距 */
+                    }
+                    
+                    .museum-modal-title { font-size: 1em; }
                 }
             </style>
         `);
@@ -474,14 +513,16 @@ async function importRoleCard(item) {
 
     const formatDate = (ts) => {
         if (!ts) return '未知时间';
-        return new Date(ts).toLocaleString();
+        return new Date(ts).toLocaleString(undefined, {
+            year: 'numeric', month: 'numeric', day: 'numeric'
+        });
     };
 
     // 3. 构建时间轴 HTML
     let timelineHtml = '';
     history.forEach((ver, idx) => {
         const isLatest = idx === 0 ? 'latest' : '';
-        const label = idx === 0 ? '(最新)' : '';
+        const label = idx === 0 ? '<span style="color:#4caf50; font-size:0.8em; margin-left:5px;">(NEW)</span>' : '';
         const note = ver.note ? ver.note : '无更新说明';
         
         const actionBtn = ver.png 
@@ -494,7 +535,7 @@ async function importRoleCard(item) {
             <div class="museum-timeline-item ${isLatest}">
                 <div class="museum-timeline-dot"></div>
                 <div class="museum-version-header">
-                    <div class="museum-version-date">${formatDate(ver.date)} <span style="color:#4caf50">${label}</span></div>
+                    <div class="museum-version-date">${formatDate(ver.date)} ${label}</div>
                     ${actionBtn}
                 </div>
                 <div class="museum-version-note">${note}</div>
@@ -543,8 +584,12 @@ async function importRoleCard(item) {
     // 6. 绑定关闭事件
     const closeModal = () => $('#museum-role-modal').remove();
     $('#museum-role-close').on('click', closeModal);
-    $('#museum-role-modal').on('click', (e) => {
-        if (e.target.id === 'museum-role-modal') closeModal();
+    
+    // 点击遮罩层关闭 (判断是否点击的是 overlay 本身)
+    $('.museum-modal-overlay').on('click', function(e) {
+        if ($(e.target).hasClass('museum-modal-overlay')) {
+            closeModal();
+        }
     });
 
     // 7. 绑定“导入”按钮点击事件

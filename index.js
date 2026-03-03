@@ -6,7 +6,7 @@ const EXTENSION_ID = "museum-extension-root"; // 唯一的 DOM ID
 let supabase = null;
 let session = null;
 let currentFilter = 'all';
-
+let keepAliveTimer = null; 
 // --- 核心工具函数 ---
 
 // 获取 ST 上下文
@@ -350,7 +350,28 @@ function injectStyles() {
     `;
     $('head').append(`<style id="museum-extension-styles">${css}</style>`);
 }
+async function keepAliveSupabase() {
+    if (!supabase) return;
+    try {
+        // 请求最少的数据，只查 1 条数据的 ID，极低消耗
+        await supabase.from("fragments").select("id").limit(1);
+        console.log("[Museum] Supabase 后台保活请求已发送，防止账号被暂停");
+    } catch (e) {
+        console.warn("[Museum] Supabase 保活请求失败:", e.message);
+    }
+}
 
+function startKeepAlive() {
+    // 如果已经有定时器，先清除，防止重复
+    if (keepAliveTimer) clearInterval(keepAliveTimer);
+    
+    // 设置定时器，每 12 小时执行一次保活请求 (12小时 * 60分 * 60秒 * 1000毫秒)
+    keepAliveTimer = setInterval(() => {
+        keepAliveSupabase();
+    }, 12 * 60 * 60 * 1000);
+    
+    console.log("[Museum] Supabase 保活机制已启动 (每12小时一次)");
+}
 
 // --- Supabase 逻辑 (保持不变) ---
 async function loadSupabase() {
@@ -386,6 +407,7 @@ async function initSupabaseClient() {
         const { data } = await supabase.auth.getSession();
         if (data.session) {
             session = data.session;
+            startKeepAlive(); // 【新增】连接成功，启动保活
             return true;
         } else if (settings.sbEmail && settings.sbPass) {
             return await doLogin();
@@ -396,6 +418,7 @@ async function initSupabaseClient() {
         return false;
     }
 }
+
 
 async function doLogin() {
     if (!supabase) return false;
@@ -408,6 +431,9 @@ async function doLogin() {
         if (error) throw error;
         session = data.session;
         toast.success("博物馆登录成功");
+        
+        startKeepAlive(); // 【新增】登录成功，启动保活
+        
         return true;
     } catch (e) {
         toast.error("登录失败: " + e.message);

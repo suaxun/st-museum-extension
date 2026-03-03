@@ -365,13 +365,17 @@ function startKeepAlive() {
     // 如果已经有定时器，先清除，防止重复
     if (keepAliveTimer) clearInterval(keepAliveTimer);
     
-    // 设置定时器，每 12 小时执行一次保活请求 (12小时 * 60分 * 60秒 * 1000毫秒)
+    // 【核心修改】进入登录状态时，立刻发送一次保活请求！
+    keepAliveSupabase(); 
+    
+    // 之后如果你一直没关网页，它会每隔 12 小时继续发一次保活请求
     keepAliveTimer = setInterval(() => {
         keepAliveSupabase();
-    }, 12 * 60 * 60 * 1000);
+    }, 12 * 60 * 60 * 1000); 
     
-    console.log("[Museum] Supabase 保活机制已启动 (每12小时一次)");
+    console.log("[Museum] Supabase 保活机制已启动 (已立即执行首次请求)");
 }
+
 
 // --- Supabase 逻辑 (保持不变) ---
 async function loadSupabase() {

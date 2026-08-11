@@ -7,6 +7,10 @@ let supabase = null;
 let session = null;
 let currentFilter = 'all';
 let keepAliveTimer = null; 
+// 【新增：用于搜索和标签过滤的变量】
+let allFetchedItems = []; // 缓存当前分类下的所有数据
+let currentSearchQuery = ''; // 当前搜索词
+let currentSelectedTag = ''; // 当前选中的标签
 // --- 核心工具函数 ---
 
 // 获取 ST 上下文
@@ -450,6 +454,7 @@ async function doLogin() {
 async function refreshGallery() {
     const grid = $('#museum-grid');
     grid.empty();
+    $('#museum-tag-container').empty(); // 清空标签
     grid.append('<div class="museum-spinner"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</div>');
 
     const success = await initSupabaseClient();
@@ -459,10 +464,12 @@ async function refreshGallery() {
         return;
     }
 
-    try {
-        let query = supabase.from("fragments").select("*").order("created_at", { ascending: false });
-        
-        if (currentFilter !== 'all') {
+try {
+    // 【修改】加上 .limit(100) 或者你觉得合适的值。
+    // 如果后续数据多，建议做分页，但这里先加一个硬上限防止手机卡死。
+    let query = supabase.from("fragments").select("*").order("created_at", { ascending: false }).limit(150);
+    
+    if (currentFilter !== 'all') {
             query = query.eq('type', currentFilter);
         } else {
             query = query.in('type', ['role_card', 'beautify']);
@@ -471,12 +478,106 @@ async function refreshGallery() {
         const { data, error } = await query;
         if (error) throw error;
 
-        renderItems(data || []);
+        // 【修改核心】将获取的数据预解析，并存入全局缓存 allFetchedItems
+        allFetchedItems = (data || []).map(item => {
+            item._parsed = {};
+            try {
+                if (item.content && item.content.startsWith('{')) {
+                    item._parsed = JSON.parse(item.content);
+                } else {
+                    item._parsed.name = item.content;
+                }
+            } catch(e){}
+            
+            // 【修复关键】：标签实际上存在数据库的 category 字段里
+            let tags = [];
+            if (item.category) {
+                // 兼容中文逗号、英文逗号、空格分割
+                tags = item.category.replace(/，/g, ",").split(/[, \s]+/).filter(t => t && t.trim().length > 0);
+            }
+            item._parsed.tags = tags;
+            
+            return item;
+        });
+
+
+        // 每次重新获取数据时，重置状态并触发渲染
+        currentSelectedTag = '';
+        $('#museum-search-input').val(currentSearchQuery); // 保持搜索词
+        applyFiltersAndRender();
+
     } catch (e) {
         toast.error("获取失败: " + e.message);
         grid.html('<div style="text-align:center; padding:20px;">加载失败</div>');
     }
 }
+// ====== 请把下面这段代码插入到 refreshGallery() 和 renderItems() 之间 ======
+
+// --- 本地过滤与渲染分发 ---
+function applyFiltersAndRender() {
+    let filtered = allFetchedItems;
+
+    // 1. 关键词搜索过滤 (匹配名字、标题、描述、标签)
+    if (currentSearchQuery) {
+        const q = currentSearchQuery.toLowerCase();
+        filtered = filtered.filter(item => {
+            const p = item._parsed;
+            const textToSearch = `${p.name||''} ${p.title||''} ${p.description||''} ${(p.tags||[]).join(' ')}`.toLowerCase();
+            return textToSearch.includes(q);
+        });
+    }
+
+    // 2. 提取当前过滤结果中所有的有效标签
+    const tagSet = new Set();
+    filtered.forEach(item => {
+        if (item._parsed && item._parsed.tags) {
+            item._parsed.tags.forEach(t => tagSet.add(t));
+        }
+    });
+    const availableTags = Array.from(tagSet).sort();
+
+    // 3. 标签匹配过滤
+    if (currentSelectedTag) {
+        // 如果当前选中的标签因为搜索被过滤掉了，就取消选中
+        if (!availableTags.includes(currentSelectedTag)) {
+            currentSelectedTag = '';
+        } else {
+            filtered = filtered.filter(item => item._parsed && item._parsed.tags && item._parsed.tags.includes(currentSelectedTag));
+        }
+    }
+
+    // 4. 更新界面
+    renderTags(availableTags);
+    renderItems(filtered);
+}
+
+// --- 渲染顶部标签条 ---
+function renderTags(tags) {
+    const container = $('#museum-tag-container');
+    container.empty();
+    
+    if (tags.length === 0) return;
+
+    tags.forEach(tag => {
+        const isActive = tag === currentSelectedTag ? 'active' : '';
+        const $btn = $(`<div class="museum-tag ${isActive}">${tag}</div>`);
+        
+        $btn.on('click', () => {
+            // 点击标签：如果已选中则取消，如果未选中则选中
+            if (currentSelectedTag === tag) {
+                currentSelectedTag = ''; 
+            } else {
+                currentSelectedTag = tag; 
+            }
+            applyFiltersAndRender();
+        });
+        
+        container.append($btn);
+    });
+}
+
+// ====== 插入结束 ======
+
 
 // 格式化时间辅助函数
 const formatDateShort = (ts) => {
@@ -554,7 +655,14 @@ function renderItems(items) {
         const detailBtn = item.type === 'role_card' 
             ? `<div class="museum-action-btn secondary toggle-overlay-btn" title="查看详情与历史版本"><i class="fa-solid fa-list-ul"></i></div>` 
             : '';
-
+        let tagsHtml = '';
+        if (item._parsed && item._parsed.tags && item._parsed.tags.length > 0) {
+            tagsHtml = '<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; margin-bottom:2px;">';
+            item._parsed.tags.forEach(t => {
+                tagsHtml += `<span style="font-size:0.7em; opacity:0.7; border:1px solid currentColor; padding:0 4px; border-radius:4px; cursor:pointer;" onclick="$('#museum-search-input').val('${t}').trigger('input');">#${t}</span>`;
+            });
+            tagsHtml += '</div>';
+        }
         const cardHtml = `
             <div class="museum-item" data-id="${item.id}">
                 <!-- 正面内容 -->
@@ -565,6 +673,7 @@ function renderItems(items) {
 
                 <div class="museum-info">
                     <div class="museum-title" title="${title}">${title}</div>
+                    ${tagsHtml}
                     ${colorDotsHtml}
                     <div class="museum-selected-idx" data-idx="0"></div>
                     
@@ -753,7 +862,8 @@ async function importBeautifyDirectly(item, $card) {
         }
 
         const themeUrl = selectedVar.file;
-        const themeName = selectedVar.name || json.title || "自定义主题";
+        // 【确保导入时恢复中文名字】
+        const themeName = json.title || selectedVar.name || "自定义主题";
 
         btn.html('<i class="fa-solid fa-spinner fa-spin"></i>');
 
@@ -761,7 +871,9 @@ async function importBeautifyDirectly(item, $card) {
         if (!response.ok) throw new Error(`网络请求失败`);
         
         const blob = await response.blob();
-        const fileName = `${themeName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}.json`;
+        
+        // 允许中文，仅过滤操作系统不允许的符号
+        const fileName = `${themeName.replace(/[\\/:*?"<>|]/g, '_')}.json`;
         const file = new File([blob], fileName, { type: "application/json" });
 
         const stThemeInput = document.getElementById('ui_preset_import_file');
@@ -785,8 +897,239 @@ async function importBeautifyDirectly(item, $card) {
     setTimeout(() => btn.html(originalText), 2000);
 }
 
-// --- 界面创建 ---
 
+// ====== 新增：一键抓取并上传主题功能 (终极拦截防销毁版) ======
+async function handleAutoCaptureTheme() {
+    if (!supabase || !session) {
+        toast.error("请先在设置中连接并登录 Supabase");
+        return;
+    }
+
+    const themeCategory = prompt("给主题打上标签 (空格隔开，直接点确定表示不加标签)：", "自用 主题");
+    if (themeCategory === null) return; 
+
+    const $btn = $('#museum-auto-capture-theme');
+    const originalText = $btn.html();
+    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 正在生成官方主题文件...').css('pointer-events', 'none');
+
+    try {
+        // ==========================================
+        // 1. 终极拦截：同时拦截 <a> 标签和 URL.revokeObjectURL
+        // ==========================================
+        const { blob: jsonBlob, downloadName: fileName } = await new Promise((resolve, reject) => {
+            const originalCreateElement = document.createElement.bind(document);
+            const originalRevoke = URL.revokeObjectURL.bind(URL);
+            
+            let timeout;
+            
+            // 清理劫持，恢复原状
+            function cleanup() {
+                document.createElement = originalCreateElement;
+                URL.revokeObjectURL = originalRevoke;
+                clearTimeout(timeout);
+            }
+
+            // 【关键修复】拦截酒馆的“自毁代码”！让文件多活10秒钟供我们读取
+            URL.revokeObjectURL = function(url) {
+                setTimeout(() => originalRevoke(url), 10000); 
+            };
+
+            // 拦截 <a> 标签的下载动作
+            document.createElement = function(tagName) {
+                const el = originalCreateElement(tagName);
+                if (tagName.toLowerCase() === 'a') {
+                    // 覆盖原生 click 行为，只拦截链接，不真的下载到用户电脑上
+                    el.click = async function() {
+                        const href = this.href;
+                        const downloadName = this.download;
+                        cleanup(); // 拿到东西就立刻恢复原状
+                        
+                        try {
+                            // 因为我们拦截了销毁，这里 fetch 绝对不会再报错了
+                            const res = await fetch(href);
+                            const blob = await res.blob();
+                            resolve({ blob, downloadName });
+                        } catch (err) {
+                            reject(err);
+                        }
+                    };
+                }
+                return el;
+            };
+
+            // 悄悄触发酒馆官方的导出按钮
+            const exportBtn = document.getElementById('ui_preset_export_button');
+            if (exportBtn) {
+                exportBtn.click();
+            } else {
+                cleanup();
+                reject(new Error("找不到酒馆的原生导出按钮"));
+            }
+
+            // 超时保护
+            timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error("读取官方导出文件超时"));
+            }, 3000);
+        });
+
+        // 提取主题名字（去掉 .json 后缀）
+        let themeName = fileName.replace(/\.json$/i, '');
+        // ==========================================
+        // 2. 截图当前聊天界面 (使用专门的图片 CDN 代理洗白跨域限制)
+        // ==========================================
+        $btn.html('<i class="fa-solid fa-camera fa-spin"></i> 正在截取聊天预览图...');
+        toast.info("正在抓取界面，请稍候...", 2000);
+        
+        if (!window.html2canvas) {
+            await new Promise((res, rej) => {
+                const script = document.createElement('script');
+                script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+                script.onload = res;
+                script.onerror = rej;
+                document.head.appendChild(script);
+            });
+        }
+
+const $hiddenElements = $('.drawer, #top-bar, #toast-container, #movingDivs');
+$hiddenElements.hide(); 
+        
+        // 给点时间让界面重绘
+        await new Promise(r => setTimeout(r, 500)); 
+
+        let imgBlob;
+        try {
+           const canvas = await html2canvas(document.body, {
+    useCORS: true,           
+    allowTaint: false,       
+    backgroundColor: null,   
+    // 【修改】检测如果是 iOS 设备，强制设为 1。因为只做预览图，1 完全足够了，能省下几倍的内存。
+    scale: /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1 : (window.devicePixelRatio || 1),
+    logging: false,
+                onclone: (clonedDoc) => {
+                    // 1. 隐藏多余 UI
+                    clonedDoc.querySelectorAll('.drawer, #top-bar, #toast-container, #movingDivs').forEach(el => {
+                        el.style.setProperty('display', 'none', 'important');
+                    });
+
+                    // 2. 移除所有高斯模糊 (html2canvas不支持模糊，遇到模糊必透明或报错)
+                    const fixStyle = clonedDoc.createElement('style');
+                    fixStyle.innerHTML = `* { backdrop-filter: none !important; }`;
+                    clonedDoc.head.appendChild(fixStyle);
+
+                    // 3. 【黑科技】强行洗白 <style> 里的图床链接
+                    // 使用 wsrv.nl 这个强大的图片代理CDN，它会自动处理跨域头并返回图片
+                    const styles = clonedDoc.querySelectorAll('style');
+                    styles.forEach(style => {
+                        if (style.innerHTML && style.innerHTML.includes('url(')) {
+                            style.innerHTML = style.innerHTML.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
+                                // 已经是本地路径或已被代理，不处理
+                                if (imgUrl.includes(location.host) || imgUrl.includes('wsrv.nl')) return match;
+                                // 替换为图片代理
+                                return `url('https://wsrv.nl/?url=${encodeURIComponent(imgUrl)}')`;
+                            });
+                        }
+                    });
+
+// 4. 洗白所有行内样式里的图床链接
+// 【修改】只遍历带有 style 属性的元素，极大减少遍历耗时
+clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
+    if (el.style && el.style.backgroundImage && el.style.backgroundImage.includes('url(')) {
+        el.style.backgroundImage = el.style.backgroundImage.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
+            if (imgUrl.includes(location.host) || imgUrl.includes('wsrv.nl')) return match;
+            return `url('https://wsrv.nl/?url=${encodeURIComponent(imgUrl)}')`;
+        });
+    }
+});
+                }
+            });
+
+            imgBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            
+            // 如果截出来是全透明(小于10KB)，说明安全限制太死，抛出错误
+            if (imgBlob.size < 10000) {
+                throw new Error("截取到了无效的透明图片。");
+            }
+            
+        } catch (err) {
+            console.error(err);
+            throw new Error("截图失败: " + err.message + " \n(建议将CSS中的图床图片存到酒馆本地 public/user/images 中)");
+        } finally {
+            $hiddenElements.show(); 
+        }
+
+
+
+
+        // ==========================================
+        // 3. 上传到 Supabase 存储桶
+        // ==========================================
+        $btn.html('<i class="fa-solid fa-cloud-arrow-up fa-spin"></i> 正在上传至云端...');
+
+        const uid = session.user.id;
+        const timestamp = Date.now();
+        const rand = Math.random().toString(36).substr(2, 5);
+        
+        // 这里的云端地址必须是纯英文，防止报错
+        const imgName = `beautify_prev_${timestamp}_${rand}.png`;
+        const jsonName = `beautify_file_${timestamp}_${rand}.json`;
+
+        const { error: imgErr } = await supabase.storage.from('uploads').upload(imgName, imgBlob);
+        if (imgErr) throw imgErr;
+        const imgUrl = supabase.storage.from('uploads').getPublicUrl(imgName).data.publicUrl;
+
+        const { error: jsonErr } = await supabase.storage.from('uploads').upload(jsonName, jsonBlob);
+        if (jsonErr) throw jsonErr;
+        const jsonUrl = supabase.storage.from('uploads').getPublicUrl(jsonName).data.publicUrl;
+
+        // ==========================================
+        // 4. 写入数据库
+        // ==========================================
+        const contentObj = {
+            title: themeName, // 标题保持完美的中文名
+            variations: [
+                {
+                    name: "主配色",
+                    color: "#ffffff", 
+                    preview: imgUrl,
+                    file: jsonUrl
+                }
+            ]
+        };
+
+        const payload = {
+            type: 'beautify',
+            category: themeCategory ? themeCategory.trim() : "快捷抓取",
+            content: JSON.stringify(contentObj),
+            file_url: imgUrl, 
+            user_id: uid
+        };
+
+        const { error: dbErr } = await supabase.from('fragments').insert(payload);
+        if (dbErr) throw dbErr;
+
+        toast.success(`🎉 主题 "${themeName}" 已成功上传！`);
+        
+        currentFilter = 'beautify';
+        $('.museum-filter-btn').removeClass('active');
+        $(`[data-filter='beautify']`).addClass('active');
+        refreshGallery();
+
+    } catch (e) {
+        console.error("[Museum Capture Error]", e);
+        toast.error("抓取/上传失败: " + e.message);
+        $('.drawer, #top-bar, #toast-container, #movingDivs').show();
+    } finally {
+        $btn.html(originalText).css('pointer-events', 'auto');
+    }
+}
+// ====== 修改结束 ======
+
+
+
+
+
+// --- 界面创建 ---
 function createSettingsHtml() {
     const settings = getExtensionSettings()[EXTENSION_NAME] || {};
     
@@ -794,10 +1137,12 @@ function createSettingsHtml() {
     <div id="${EXTENSION_ID}" class="inline-drawer wide100p flexFlowColumn">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b><i class="fa-solid fa-building-columns"></i> 博物馆 (Museum)</b>
+            <!-- 【修复】使用 down 代表默认折叠状态 -->
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
 
-        <div class="inline-drawer-content museum-drawer-content">
+        <!-- 【修复】加上 style="display: none;" 彻底让它默认关闭，拯救 iOS -->
+        <div class="inline-drawer-content museum-drawer-content" style="display: none;">
             <div class="flex-container">
                 <div class="menu_button fa-solid fa-arrows-rotate" id="museum-refresh-btn" title="刷新"></div>
                 <div class="menu_button fa-solid fa-gear" id="museum-config-toggle" title="设置"></div>
@@ -818,9 +1163,19 @@ function createSettingsHtml() {
                 <div class="museum-filter-btn" data-filter="beautify">美化</div>
             </div>
 
+            <button id="museum-auto-capture-theme" class="menu_button" style="width: 100%; margin-top: 5px; background-color: var(--SmartThemeQuoteColor); color: var(--SmartThemeBgColor);">
+                <i class="fa-solid fa-camera"></i> 一键抓取当前主题入库
+            </button>
+
+            <!-- 搜索框 -->
+            <input type="text" id="museum-search-input" class="text_pole museum-search-box" placeholder="输入名称、描述或标签搜索...">
+            
+            <!-- 标签容器 -->
+            <div id="museum-tag-container" class="museum-tags"></div>
+
             <div id="museum-grid" class="museum-grid">
                 <div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.5; font-size:0.8em;">
-                    点击上方刷新按钮加载内容
+                    正在加载博物馆内容...
                 </div>
             </div>
         </div>
@@ -828,8 +1183,8 @@ function createSettingsHtml() {
     `;
 }
 
-// --- 初始化逻辑 ---
 
+// --- 初始化逻辑 ---
 function initializePlugin() {
     console.log("[Museum] 初始化...");
 
@@ -859,7 +1214,8 @@ function initializePlugin() {
 
     // 绑定事件
     $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
-    
+    $('#museum-auto-capture-theme').on('click', handleAutoCaptureTheme);
+
     $('#museum-save-btn').on('click', async () => {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
         extSettings.sbUrl = $('#museum-sb-url').val().trim();
@@ -876,20 +1232,48 @@ function initializePlugin() {
         }
     });
 
-    $('.museum-filter-btn').on('click', function() {
+    $('#museum-refresh-btn').on('click', refreshGallery);
+    
+    let searchTimeout;
+    $('#museum-search-input').on('input', function() {
+        clearTimeout(searchTimeout);
+        const val = $(this).val().trim();
+        searchTimeout = setTimeout(() => {
+            currentSearchQuery = val;
+            applyFiltersAndRender();
+        }, 300);
+    });
+
+    $('.museum-filter-btn').off('click').on('click', function() {
         $('.museum-filter-btn').removeClass('active');
         $(this).addClass('active');
         currentFilter = $(this).data('filter');
+        
+        currentSearchQuery = '';
+        currentSelectedTag = '';
+        $('#museum-search-input').val('');
+        
         refreshGallery();
     });
 
-    $('#museum-refresh-btn').on('click', refreshGallery);
-
-    loadSupabase().then(() => {
-        const s = getExtensionSettings()[EXTENSION_NAME];
-        if (s && s.sbUrl && s.sbKey) {
-            initSupabaseClient().then(() => {
-                if (session) refreshGallery();
+    // 【完美修复】IOS崩溃关键：懒加载机制
+    let hasLoadedGallery = false;
+    // 监听酒馆原生下拉面板的点击事件
+    $(`#${EXTENSION_ID} .inline-drawer-toggle`).on('click', function() {
+        // 如果该区域尚未加载数据
+        if (!hasLoadedGallery) {
+            hasLoadedGallery = true; // 标记为已加载
+            
+            // 开始懒加载数据库
+            loadSupabase().then(() => {
+                const s = getExtensionSettings()[EXTENSION_NAME];
+                if (s && s.sbUrl && s.sbKey) {
+                    initSupabaseClient().then(() => {
+                        if (session) refreshGallery();
+                    });
+                } else {
+                    $('#museum-grid').html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">未配置数据库。<br>请点击上方齿轮图标配置。</div>');
+                }
             });
         }
     });
@@ -912,3 +1296,5 @@ function initializePlugin() {
 
     waitForSillyTavernContext();
 })();
+
+

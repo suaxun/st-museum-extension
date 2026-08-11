@@ -897,15 +897,14 @@ async function importBeautifyDirectly(item, $card) {
     setTimeout(() => btn.html(originalText), 2000);
 }
 
-
-// ====== 新增：一键抓取并上传主题功能 (终极拦截防销毁版) ======
+// ====== 新增：一键抓取并上传主题功能 (手机端特化防弹版) ======
 async function handleAutoCaptureTheme() {
     if (!supabase || !session) {
         toast.error("请先在设置中连接并登录 Supabase");
         return;
     }
 
-    const themeCategory = prompt("给主题打上标签 (空格隔开，直接点确定表示不加标签)：", "自用 主题");
+    const themeCategory = prompt("给主题打上标签 (空格隔开, 直接点确定表示不加标签)：", "自用 主题");
     if (themeCategory === null) return; 
 
     const $btn = $('#museum-auto-capture-theme');
@@ -914,43 +913,41 @@ async function handleAutoCaptureTheme() {
 
     try {
         // ==========================================
-        // 1. 终极拦截：同时拦截 <a> 标签和 URL.revokeObjectURL
+        // 1. 终极拦截：直接从内存“偷取” Blob 数据 (100% 解决手机端 Failed to fetch)
         // ==========================================
         const { blob: jsonBlob, downloadName: fileName } = await new Promise((resolve, reject) => {
             const originalCreateElement = document.createElement.bind(document);
-            const originalRevoke = URL.revokeObjectURL.bind(URL);
+            const originalCreateObjectURL = URL.createObjectURL.bind(URL);
             
             let timeout;
+            let stolenBlob = null; // 用于存放偷取到的内存文件
             
-            // 清理劫持，恢复原状
             function cleanup() {
                 document.createElement = originalCreateElement;
-                URL.revokeObjectURL = originalRevoke;
+                URL.createObjectURL = originalCreateObjectURL;
                 clearTimeout(timeout);
             }
 
-            // 【关键修复】拦截酒馆的“自毁代码”！让文件多活10秒钟供我们读取
-            URL.revokeObjectURL = function(url) {
-                setTimeout(() => originalRevoke(url), 10000); 
+            // 【核心黑科技】酒馆导出文件必定会经过 URL.createObjectURL
+            // 我们在这里拦截，直接把生成的 Blob 原文件扣下来！完全不需要发送 fetch 网络请求！
+            URL.createObjectURL = function(obj) {
+                if (obj instanceof Blob) {
+                    stolenBlob = obj;
+                }
+                return originalCreateObjectURL.apply(this, arguments);
             };
 
-            // 拦截 <a> 标签的下载动作
+            // 拦截 <a> 标签的点击动作
             document.createElement = function(tagName) {
                 const el = originalCreateElement(tagName);
                 if (tagName.toLowerCase() === 'a') {
-                    // 覆盖原生 click 行为，只拦截链接，不真的下载到用户电脑上
-                    el.click = async function() {
-                        const href = this.href;
+                    el.click = function() {
                         const downloadName = this.download;
-                        cleanup(); // 拿到东西就立刻恢复原状
-                        
-                        try {
-                            // 因为我们拦截了销毁，这里 fetch 绝对不会再报错了
-                            const res = await fetch(href);
-                            const blob = await res.blob();
-                            resolve({ blob, downloadName });
-                        } catch (err) {
-                            reject(err);
+                        cleanup(); 
+                        if (stolenBlob) {
+                            resolve({ blob: stolenBlob, downloadName });
+                        } else {
+                            reject(new Error("未能成功拦截到主题数据。"));
                         }
                     };
                 }
@@ -975,8 +972,10 @@ async function handleAutoCaptureTheme() {
 
         // 提取主题名字（去掉 .json 后缀）
         let themeName = fileName.replace(/\.json$/i, '');
+
+
         // ==========================================
-        // 2. 截图当前聊天界面 (使用专门的图片 CDN 代理洗白跨域限制)
+        // 2. 截图聊天界面 (手机端特化优化)
         // ==========================================
         $btn.html('<i class="fa-solid fa-camera fa-spin"></i> 正在截取聊天预览图...');
         toast.info("正在抓取界面，请稍候...", 2000);
@@ -991,75 +990,83 @@ async function handleAutoCaptureTheme() {
             });
         }
 
-const $hiddenElements = $('.drawer, #top-bar, #toast-container, #movingDivs');
-$hiddenElements.hide(); 
+        // 判断是否为移动端
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+        const $hiddenElements = $('.drawer, #top-bar, #toast-container, #movingDivs');
+        $hiddenElements.hide(); 
         
         // 给点时间让界面重绘
         await new Promise(r => setTimeout(r, 500)); 
 
         let imgBlob;
         try {
-           const canvas = await html2canvas(document.body, {
-    useCORS: true,           
-    allowTaint: false,       
-    backgroundColor: null,   
-    // 【修改】检测如果是 iOS 设备，强制设为 1。因为只做预览图，1 完全足够了，能省下几倍的内存。
-    scale: /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1 : (window.devicePixelRatio || 1),
-    logging: false,
+            // 【手机端特化】如果是在手机上，只截图 #chat 聊天框，不截全屏
+            const targetElement = isMobile ? (document.getElementById('chat') || document.body) : document.body;
+
+            const canvasOptions = {
+                useCORS: true,
+                allowTaint: false,
+                backgroundColor: null,
+                scale: isMobile ? 1 : (window.devicePixelRatio || 1), // 手机强制 1 倍分辨率防 OOM
+                logging: false,
                 onclone: (clonedDoc) => {
-                    // 1. 隐藏多余 UI
+                    // 隐藏多余 UI
                     clonedDoc.querySelectorAll('.drawer, #top-bar, #toast-container, #movingDivs').forEach(el => {
                         el.style.setProperty('display', 'none', 'important');
                     });
 
-                    // 2. 移除所有高斯模糊 (html2canvas不支持模糊，遇到模糊必透明或报错)
+                    // 移除模糊滤镜，防止 html2canvas 报错透明
                     const fixStyle = clonedDoc.createElement('style');
                     fixStyle.innerHTML = `* { backdrop-filter: none !important; }`;
                     clonedDoc.head.appendChild(fixStyle);
 
-                    // 3. 【黑科技】强行洗白 <style> 里的图床链接
-                    // 使用 wsrv.nl 这个强大的图片代理CDN，它会自动处理跨域头并返回图片
-                    const styles = clonedDoc.querySelectorAll('style');
-                    styles.forEach(style => {
-                        if (style.innerHTML && style.innerHTML.includes('url(')) {
-                            style.innerHTML = style.innerHTML.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
-                                // 已经是本地路径或已被代理，不处理
-                                if (imgUrl.includes(location.host) || imgUrl.includes('wsrv.nl')) return match;
-                                // 替换为图片代理
-                                return `url('https://wsrv.nl/?url=${encodeURIComponent(imgUrl)}')`;
-                            });
-                        }
-                    });
-
-// 4. 洗白所有行内样式里的图床链接
-// 【修改】只遍历带有 style 属性的元素，极大减少遍历耗时
-clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
-    if (el.style && el.style.backgroundImage && el.style.backgroundImage.includes('url(')) {
-        el.style.backgroundImage = el.style.backgroundImage.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
-            if (imgUrl.includes(location.host) || imgUrl.includes('wsrv.nl')) return match;
-            return `url('https://wsrv.nl/?url=${encodeURIComponent(imgUrl)}')`;
-        });
-    }
-});
+                    if (isMobile) {
+                        // 【手机端终极防护】
+                        // 在手机上截图时，强行把所有图片(头像等)替换成透明占位符，
+                        // 完全阻断外网图片请求，100% 杜绝 Failed to fetch 和超时！
+                        const dummyImg = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+                        clonedDoc.querySelectorAll('img').forEach(img => {
+                            img.src = dummyImg;
+                            img.style.backgroundColor = 'var(--SmartThemeQuoteColor, #cccccc)';
+                        });
+                        clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
+                            el.style.backgroundImage = 'none';
+                            el.style.backgroundColor = 'var(--SmartThemeQuoteColor, #cccccc)';
+                        });
+                    } else {
+                        // 【PC端】依然走图床代理路线保留原图
+                        clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
+                            if (el.style && el.style.backgroundImage && el.style.backgroundImage.includes('url(')) {
+                                el.style.backgroundImage = el.style.backgroundImage.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
+                                    if (imgUrl.includes(location.host) || imgUrl.includes('wsrv.nl')) return match;
+                                    return `url('https://wsrv.nl/?url=${encodeURIComponent(imgUrl)}')`;
+                                });
+                            }
+                        });
+                    }
                 }
-            });
+            };
 
+            // 如果是手机端，限制最大高度为当前屏幕高度，防止聊天记录过长撑爆内存
+            if (isMobile) {
+                canvasOptions.height = Math.min(targetElement.scrollHeight, window.innerHeight);
+                canvasOptions.windowHeight = window.innerHeight;
+            }
+
+            const canvas = await html2canvas(targetElement, canvasOptions);
             imgBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
             
-            // 如果截出来是全透明(小于10KB)，说明安全限制太死，抛出错误
             if (imgBlob.size < 10000) {
                 throw new Error("截取到了无效的透明图片。");
             }
             
         } catch (err) {
             console.error(err);
-            throw new Error("截图失败: " + err.message + " \n(建议将CSS中的图床图片存到酒馆本地 public/user/images 中)");
+            throw new Error("截图失败: " + err.message);
         } finally {
             $hiddenElements.show(); 
         }
-
-
-
 
         // ==========================================
         // 3. 上传到 Supabase 存储桶
@@ -1070,23 +1077,30 @@ clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
         const timestamp = Date.now();
         const rand = Math.random().toString(36).substr(2, 5);
         
-        // 这里的云端地址必须是纯英文，防止报错
         const imgName = `beautify_prev_${timestamp}_${rand}.png`;
         const jsonName = `beautify_file_${timestamp}_${rand}.json`;
 
-        const { error: imgErr } = await supabase.storage.from('uploads').upload(imgName, imgBlob);
-        if (imgErr) throw imgErr;
+        try {
+            const { error: imgErr } = await supabase.storage.from('uploads').upload(imgName, imgBlob);
+            if (imgErr) throw imgErr;
+        } catch (err) {
+            throw new Error("上传图片至云端失败: " + err.message);
+        }
         const imgUrl = supabase.storage.from('uploads').getPublicUrl(imgName).data.publicUrl;
 
-        const { error: jsonErr } = await supabase.storage.from('uploads').upload(jsonName, jsonBlob);
-        if (jsonErr) throw jsonErr;
+        try {
+            const { error: jsonErr } = await supabase.storage.from('uploads').upload(jsonName, jsonBlob);
+            if (jsonErr) throw jsonErr;
+        } catch (err) {
+            throw new Error("上传JSON至云端失败: " + err.message);
+        }
         const jsonUrl = supabase.storage.from('uploads').getPublicUrl(jsonName).data.publicUrl;
 
         // ==========================================
         // 4. 写入数据库
         // ==========================================
         const contentObj = {
-            title: themeName, // 标题保持完美的中文名
+            title: themeName,
             variations: [
                 {
                     name: "主配色",
@@ -1106,7 +1120,7 @@ clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
         };
 
         const { error: dbErr } = await supabase.from('fragments').insert(payload);
-        if (dbErr) throw dbErr;
+        if (dbErr) throw new Error("数据库写入失败: " + dbErr.message);
 
         toast.success(`🎉 主题 "${themeName}" 已成功上传！`);
         
@@ -1123,7 +1137,7 @@ clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
         $btn.html(originalText).css('pointer-events', 'auto');
     }
 }
-// ====== 修改结束 ======
+
 
 
 

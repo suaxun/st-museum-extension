@@ -399,3 +399,45 @@
 .museum-selected-idx {
     display: none;
 }
+/* 搜索框样式 */
+.museum-search-box {
+    width: 100%;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+/* 标签列表容器 */
+.museum-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+    max-height: 80px; /* 限制高度，超出滚动 */
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/* 单个标签样式 */
+.museum-tag {
+    font-size: 0.75em;
+    padding: 3px 10px;
+    background: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 12px;
+    cursor: pointer;
+    color: var(--SmartThemeBodyColor);
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.museum-tag:hover {
+    border-color: var(--SmartThemeQuoteColor);
+    transform: scale(1.05);
+}
+
+.museum-tag.active {
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBgColor);
+    border-color: var(--SmartThemeQuoteColor);
+    font-weight: bold;
+}

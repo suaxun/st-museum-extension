@@ -479,7 +479,7 @@ async function refreshGallery() {
         if (currentFilter !== 'all') {
             query = query.eq('type', currentFilter);
         } else {
-            query = query.in('type', ['role_card', 'beautify']);
+            query = query.in('type', ['role_card', 'beautify', 'image']);
         }
 
         const { data, error } = await query;
@@ -641,6 +641,21 @@ function renderItems(items) {
                 }
             } catch (e) { }
         }
+// 在 else if (item.type === 'beautify') { ... } 的大括号后面，添加：
+        else if (item.type === 'image') {
+            typeLabel = "图片";
+            try {
+                // 如果 content 存了 JSON 就解析，没存就直接把 content 当标题
+                if (item.content.startsWith('{')) {
+                    const json = JSON.parse(item.content);
+                    title = json.title || json.name || "未命名图片";
+                    description = json.description || "";
+                } else {
+                    title = item.content || "未命名图片";
+                }
+                imgUrl = item.file_url;
+            } catch (e) { title = item.content || "未命名图片"; }
+        }
 
         // --- 构建 HTML ---
 
@@ -680,11 +695,21 @@ function renderItems(items) {
                     ${colorDotsHtml}
                     <div class="museum-selected-idx" data-idx="0"></div>
                     
+                    <!-- ！！！修改这部分按钮渲染逻辑！！！ -->
                     <div class="museum-btn-group">
-                        <div class="museum-action-btn import-btn">
-                            <i class="fa-solid fa-download"></i> 导入
-                        </div>
-                        ${detailBtn}
+                        ${item.type === 'image' ? `
+                            <div class="museum-action-btn set-bg-btn" style="background-color: #2196F3; color: white;">
+                                <i class="fa-solid fa-panorama"></i> 设为背景
+                            </div>
+                            <div class="museum-action-btn set-persona-btn" style="background-color: #4CAF50; color: white;">
+                                <i class="fa-solid fa-user"></i> 设为Persona
+                            </div>
+                        ` : `
+                            <div class="museum-action-btn import-btn">
+                                <i class="fa-solid fa-download"></i> 导入
+                            </div>
+                            ${detailBtn}
+                        `}
                     </div>
                 </div>
 
@@ -767,7 +792,18 @@ function renderItems(items) {
             e.stopPropagation(); 
             handleImport(item, $card);
         });
-        
+                // ！！！在 3. 主导入按钮 的下方，添加这段绑定事件！！！
+        if (item.type === 'image') {
+            $card.find('.set-bg-btn').on('click', function(e) {
+                e.stopPropagation();
+                applyImageToTarget(imgUrl, 'background', $(this));
+            });
+            $card.find('.set-persona-btn').on('click', function(e) {
+                e.stopPropagation();
+                applyImageToTarget(imgUrl, 'persona', $(this));
+            });
+        }
+
         grid.append($card);
     });
 }
@@ -797,6 +833,110 @@ async function handleImport(item, $card) {
 
     } else if (item.type === 'beautify') {
         await importBeautifyDirectly(item, $card);
+    }
+}
+// ================= 新增：图片应用与快捷按钮注入 =================
+
+// 将网络图片应用到指定的输入框 (背景或Persona)
+async function applyImageToTarget(url, targetType, $btn) {
+    const originalHtml = $btn.html();
+    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
+    
+    try {
+        // 1. 获取图片并转为 Blob
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("图片下载失败");
+        const blob = await res.blob();
+        
+        // 2. 构造 File 对象
+        const ext = blob.type.split('/')[1] || 'png';
+        const filename = `museum_export_${Date.now()}.${ext}`;
+        const file = new File([blob], filename, { type: blob.type });
+        
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        
+        // 3. 寻找酒馆原生输入框并触发
+        let inputId = '';
+        let successMsg = '';
+        
+        if (targetType === 'background') {
+            inputId = 'add_bg_button'; // 酒馆全局背景的隐藏输入框
+            successMsg = "已发送至背景，请稍候";
+        } else if (targetType === 'persona') {
+            inputId = 'avatar_upload_file'; // Persona头像的隐藏输入框
+            successMsg = "请在弹出的裁剪窗口中确认";
+        }
+
+        const inputElement = document.getElementById(inputId);
+        if (!inputElement) throw new Error("找不到酒馆的原生组件: " + inputId);
+        
+        // 替换文件并触发原生 change 事件
+        inputElement.files = dataTransfer.files;
+        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        toast.success(successMsg);
+        $btn.html('<i class="fa-solid fa-check"></i> 成功');
+
+        // 如果是更换Persona，建议关闭扩展抽屉，方便用户看到裁剪弹窗
+        if (targetType === 'persona') {
+            $('#extensions-settings-button').removeClass('open');
+            $('#rm_extensions_block').addClass('closedDrawer');
+        }
+
+    } catch (e) {
+        console.error(e);
+        toast.error("应用图片失败: " + e.message);
+        $btn.html('<i class="fa-solid fa-xmark"></i> 失败');
+    } finally {
+        setTimeout(() => {
+            $btn.html(originalHtml).css('pointer-events', 'auto');
+        }, 2000);
+    }
+}
+
+// 在酒馆原生界面注入“从图库选择”的快捷按钮
+function injectMuseumHooks() {
+    // 1. 在背景面板的“Add Background”按钮前插入
+    if (!$('#museum-hook-bg').length) {
+        const bgHtml = `
+            <button id="museum-hook-bg" class="menu_button menu_button_icon" title="从博物馆图库选择背景" style="color: var(--SmartThemeQuoteColor);">
+                <i class="fa-solid fa-building-columns"></i>
+                <span>图库选择</span>
+            </button>
+        `;
+        $('#add_background_button_top').before(bgHtml);
+        
+        $('#museum-hook-bg').on('click', () => {
+            // 关闭背景抽屉，打开扩展抽屉
+            $('#backgrounds-button .drawer-toggle').click(); 
+            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
+                $('#extensions-settings-button .drawer-toggle').click();
+            }
+            // 自动切换到图片 Tab
+            setTimeout(() => {
+                $('.museum-filter-btn[data-filter="image"]').click();
+            }, 300);
+        });
+    }
+
+    // 2. 在 Persona 面板的“更换头像”按钮旁插入
+    if (!$('#museum-hook-persona').length) {
+        const personaHtml = `
+            <div id="museum-hook-persona" class="menu_button fa-solid fa-building-columns" title="从博物馆图库选择头像" style="color: var(--SmartThemeQuoteColor);"></div>
+        `;
+        $('#persona_set_image_button').after(personaHtml);
+        
+        $('#museum-hook-persona').on('click', () => {
+            // 关闭Persona抽屉，打开扩展抽屉
+            $('#persona-management-button .drawer-toggle').click();
+            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
+                $('#extensions-settings-button .drawer-toggle').click();
+            }
+            setTimeout(() => {
+                $('.museum-filter-btn[data-filter="image"]').click();
+            }, 300);
+        });
     }
 }
 
@@ -1183,6 +1323,7 @@ function createSettingsHtml() {
                 <div class="museum-filter-btn active" data-filter="all">全部</div>
                 <div class="museum-filter-btn" data-filter="role_card">角色</div>
                 <div class="museum-filter-btn" data-filter="beautify">美化</div>
+                <div class="museum-filter-btn" data-filter="image">图片/相册</div>
             </div>
 
             <button id="museum-auto-capture-theme" class="menu_button" style="width: 100%; margin-top: 5px; background-color: var(--SmartThemeQuoteColor); color: var(--SmartThemeBgColor);">
@@ -1318,7 +1459,7 @@ function initializePlugin() {
             });
         }
     });
-
+injectMuseumHooks();
     console.log("[Museum] 初始化完成");
 }
 

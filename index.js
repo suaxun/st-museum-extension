@@ -866,6 +866,157 @@ function renderItems(items) {
         grid.append($card);
     });
 }
+// ================= 核心逻辑：图片应用与快捷按钮注入 =================
+
+// 1. 将网络图片转换为 File 对象并推给酒馆组件
+async function applyImageToTarget(url, targetType, $btn) {
+    const originalHtml = $btn.html();
+    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
+    
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("图片下载失败");
+        const blob = await res.blob();
+        
+        const ext = blob.type.split('/')[1] || 'png';
+        const filename = `museum_export_${Date.now()}.${ext}`;
+        const file = new File([blob], filename, { type: blob.type });
+        
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        
+        let inputId = targetType === 'background' ? 'add_bg_button' : 'avatar_upload_file';
+        const inputElement = document.getElementById(inputId);
+        if (!inputElement) throw new Error("找不到酒馆原生组件: " + inputId);
+        
+        // 替换文件并触发原生 change 事件
+        inputElement.files = dataTransfer.files;
+        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的裁剪窗口中确认");
+        $btn.html('<i class="fa-solid fa-check"></i> 成功');
+
+        if (targetType === 'persona') {
+            // 如果是换Persona头像，自动把扩展菜单收起来，方便看裁剪窗口
+            $('#extensions-settings-button .drawer-toggle').click(); 
+        }
+    } catch (e) {
+        console.error(e);
+        toast.error("应用图片失败: " + e.message);
+        $btn.html('<i class="fa-solid fa-xmark"></i> 失败');
+    } finally {
+        setTimeout(() => $btn.html(originalHtml).css('pointer-events', 'auto'), 2000);
+    }
+}
+
+// 2. 弹出 Persona 选择器 (解决每次都新建User的问题)
+function showPersonaSelector(imgUrl, $btn) {
+    const personas = [];
+    // 抓取酒馆中所有的 Persona
+    $('#user_avatar_block .avatar-container').each(function(idx) {
+        const name = $(this).find('.ch_name').text();
+        if (name && name !== "+++") personas.push({ name, el: this });
+    });
+
+    if (personas.length === 0) {
+        toast.error("未找到任何已有 Persona！");
+        return;
+    }
+
+    const optionsHtml = personas.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
+    
+    const selectorHtml = `
+        <div class="museum-persona-selector" style="margin-top: 5px; padding: 8px; background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.5)); border-radius: 4px; border: 1px solid var(--SmartThemeBorderColor); z-index:999; position:relative;">
+            <div style="font-size:0.8em; margin-bottom:4px; color: var(--SmartThemeBodyColor, white);">选择要更改头像的 User:</div>
+            <select class="text_pole" style="width: 100%; margin-bottom: 8px;">${optionsHtml}</select>
+            <div style="display: flex; gap: 5px;">
+                <button class="museum-action-btn confirm-persona" style="background: #4CAF50; color: white; border:none; padding:4px;">确认更改</button>
+                <button class="museum-action-btn cancel-persona" style="background: #f44336; color: white; border:none; padding:4px;">取消</button>
+            </div>
+        </div>
+    `;
+    
+    const $btnGroup = $btn.parent();
+    $btnGroup.hide();
+    $btnGroup.after(selectorHtml);
+    
+    const $selector = $btnGroup.next('.museum-persona-selector');
+    
+    $selector.find('.cancel-persona').on('click', (e) => {
+        e.stopPropagation();
+        $selector.remove();
+        $btnGroup.show();
+    });
+    
+    $selector.find('.confirm-persona').on('click', async (e) => {
+        e.stopPropagation();
+        const selectedIdx = $selector.find('select').val();
+        const selectedPersona = personas[selectedIdx];
+        
+        $selector.remove();
+        $btnGroup.show();
+        
+        // 【核心修复1】点击选中这个 Persona (触发ST内部选中状态)
+        $(selectedPersona.el).click();
+        
+        // 等待 ST UI 响应完成
+        await new Promise(r => setTimeout(r, 300));
+        
+        // 【核心修复2】强制填入覆写字段！只要这个字段有名字，酒馆就不会新建 User
+        $('#avatar_upload_overwrite').val(selectedPersona.name);
+        
+        // 开始下载图片并触发上传事件
+        applyImageToTarget(imgUrl, 'persona', $btn);
+    });
+}
+
+// 3. 在酒馆原生界面注入“从图库选择”的快捷按钮 (解决点不动的问题)
+function injectMuseumHooks() {
+    // A. 在背景面板注入
+    if (!$('#museum-hook-bg').length) {
+        const bgHtml = `<button type="button" id="museum-hook-bg" class="menu_button menu_button_icon" title="从博物馆选择背景" style="color: var(--SmartThemeQuoteColor);"><i class="fa-solid fa-building-columns"></i><span>图库选择</span></button>`;
+        $('#add_background_button_top').before(bgHtml);
+        
+        // 改用直接绑定 document 的事件，防止被 ST 其他事件拦截
+        $(document).on('click', '#museum-hook-bg', function(e) {
+            e.preventDefault();
+            // 收起背景面板
+            if ($('#Backgrounds').hasClass('openDrawer') || $('#backgrounds-button').hasClass('openDrawer')) {
+                $('#backgrounds-drawer-toggle').click();
+            }
+            // 展开扩展面板
+            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
+                $('#extensions-settings-button > .drawer-toggle').click();
+            }
+            // 自动切到图片Tab
+            setTimeout(() => {
+                $('.museum-filter-btn[data-filter="image"]').click();
+            }, 300);
+        });
+    }
+
+    // B. 在 Persona 面板注入
+    if (!$('#museum-hook-persona').length) {
+        const personaHtml = `<div id="museum-hook-persona" class="menu_button fa-solid fa-building-columns" title="从博物馆图库选择头像" style="color: var(--SmartThemeQuoteColor);"></div>`;
+        $('#persona_set_image_button').after(personaHtml);
+        
+        $(document).on('click', '#museum-hook-persona', function(e) {
+            e.preventDefault();
+            // 收起Persona面板
+            if ($('#PersonaManagement').hasClass('openDrawer') || $('#persona-management-button').hasClass('openDrawer')) {
+                $('#persona-management-button > .drawer-toggle').click();
+            }
+            // 展开扩展面板
+            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
+                $('#extensions-settings-button > .drawer-toggle').click();
+            }
+            // 自动切到图片Tab
+            setTimeout(() => {
+                $('.museum-filter-btn[data-filter="image"]').click();
+            }, 300);
+        });
+    }
+}
 
 // --- 导入逻辑 ---
 
@@ -894,150 +1045,7 @@ async function handleImport(item, $card) {
         await importBeautifyDirectly(item, $card);
     }
 }
-// ================= 替换：图片应用与快捷按钮注入 =================
 
-// 将网络图片应用到指定的输入框 (背景或Persona)
-async function applyImageToTarget(url, targetType, $btn) {
-    const originalHtml = $btn.html();
-    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
-    
-    try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("图片下载失败");
-        const blob = await res.blob();
-        
-        const ext = blob.type.split('/')[1] || 'png';
-        const filename = `museum_export_${Date.now()}.${ext}`;
-        const file = new File([blob], filename, { type: blob.type });
-        
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        
-        let inputId = targetType === 'background' ? 'add_bg_button' : 'avatar_upload_file';
-        const inputElement = document.getElementById(inputId);
-        if (!inputElement) throw new Error("找不到原生组件: " + inputId);
-        
-        inputElement.files = dataTransfer.files;
-        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹窗中确认头像裁剪");
-        $btn.html('<i class="fa-solid fa-check"></i> 成功');
-
-        if (targetType === 'persona') {
-            $('#extensions-settings-button .drawer-toggle').click();
-        }
-
-    } catch (e) {
-        console.error(e);
-        toast.error("应用图片失败: " + e.message);
-        $btn.html('<i class="fa-solid fa-xmark"></i> 失败');
-    } finally {
-        setTimeout(() => $btn.html(originalHtml).css('pointer-events', 'auto'), 2000);
-    }
-}
-
-// 弹出 Persona 选择器
-function showPersonaSelector(imgUrl, $btn) {
-    const personas = [];
-    // 抓取酒馆中所有的 Persona
-    $('#user_avatar_block .avatar-container').each(function(idx) {
-        const name = $(this).find('.ch_name').text() || 'Persona ' + (idx + 1);
-        personas.push({ name, el: this });
-    });
-
-    if (personas.length === 0) {
-        toast.error("未找到任何Persona！");
-        return;
-    }
-
-    const optionsHtml = personas.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
-    
-    const selectorHtml = `
-        <div class="museum-persona-selector" style="margin-top: 5px; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 4px; border: 1px solid var(--SmartThemeBorderColor);">
-            <div style="font-size:0.8em; margin-bottom:4px;">选择要修改的Persona:</div>
-            <select class="text_pole" style="width: 100%; margin-bottom: 5px;">${optionsHtml}</select>
-            <div style="display: flex; gap: 5px;">
-                <button class="museum-action-btn confirm-persona" style="background: #4CAF50; color: white;">确认</button>
-                <button class="museum-action-btn cancel-persona" style="background: #f44336; color: white;">取消</button>
-            </div>
-        </div>
-    `;
-    
-    const $btnGroup = $btn.parent();
-    $btnGroup.hide(); // 隐藏原本的按钮组
-    $btnGroup.after(selectorHtml);
-    
-    const $selector = $btnGroup.next('.museum-persona-selector');
-    
-    $selector.find('.cancel-persona').on('click', (e) => {
-        e.stopPropagation();
-        $selector.remove();
-        $btnGroup.show();
-    });
-    
-    $selector.find('.confirm-persona').on('click', async (e) => {
-        e.stopPropagation();
-        const selectedIdx = $selector.find('select').val();
-        const selectedPersona = personas[selectedIdx];
-        
-        $selector.remove();
-        $btnGroup.show();
-        
-        // 【核心】模拟点击选中的 Persona，让酒馆将其设为当前活跃状态
-        $(selectedPersona.el).click();
-        
-        // 给酒馆一点时间切换状态
-        await new Promise(r => setTimeout(r, 200));
-        
-        // 调用上传
-        applyImageToTarget(imgUrl, 'persona', $btn);
-    });
-}
-
-// 在酒馆原生界面注入“从图库选择”的快捷按钮
-function injectMuseumHooks() {
-    // 1. 背景面板注入
-    if (!$('#museum-hook-bg').length) {
-        const bgHtml = `
-            <button id="museum-hook-bg" class="menu_button menu_button_icon" title="从博物馆选择"><i class="fa-solid fa-building-columns"></i><span>图库</span></button>
-        `;
-        $('#add_background_button_top').before(bgHtml);
-        
-        $('#museum-hook-bg').on('click', () => {
-            // 点击背景面板自己的 Toggle 关掉背景面板
-            $('#backgrounds-drawer-toggle').click();
-            
-            // 如果扩展面板没开，就点开它
-            if (!$('#extensions-settings-button').hasClass('openDrawer')) {
-                $('#extensions-settings-button > .drawer-toggle').click();
-            }
-            
-            // 自动切到图片Tab
-            setTimeout(() => $('.museum-filter-btn[data-filter="image"]').click(), 300);
-        });
-    }
-
-    // 2. Persona 面板注入
-    if (!$('#museum-hook-persona').length) {
-        const personaHtml = `
-            <div id="museum-hook-persona" class="menu_button fa-solid fa-building-columns" title="从博物馆图库选择"></div>
-        `;
-        $('#persona_set_image_button').after(personaHtml);
-        
-        $('#museum-hook-persona').on('click', () => {
-            // 点击Persona自己的 Toggle 关掉Persona面板
-            $('#persona-management-button > .drawer-toggle').click();
-            
-            // 如果扩展面板没开，就点开它
-            if (!$('#extensions-settings-button').hasClass('openDrawer')) {
-                $('#extensions-settings-button > .drawer-toggle').click();
-            }
-            
-            // 自动切到图片Tab
-            setTimeout(() => $('.museum-filter-btn[data-filter="image"]').click(), 300);
-        });
-    }
-}
 
 // 历史版本导入
 async function handleHistoryImport(url, charName, $btn) {
@@ -1138,158 +1146,8 @@ async function importBeautifyDirectly(item, $card) {
     }
     setTimeout(() => btn.html(originalText), 2000);
 }
-// ================= 新增：图片应用与快捷按钮注入 =================
 
-// 将网络图片转换为 File 对象并推给酒馆组件
-async function applyImageToTarget(url, targetType, $btn) {
-    const originalHtml = $btn.html();
-    $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
-    
-    try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("图片下载失败");
-        const blob = await res.blob();
-        
-        const ext = blob.type.split('/')[1] || 'png';
-        const filename = `museum_export_${Date.now()}.${ext}`;
-        const file = new File([blob], filename, { type: blob.type });
-        
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        
-        let inputId = targetType === 'background' ? 'add_bg_button' : 'avatar_upload_file';
-        const inputElement = document.getElementById(inputId);
-        if (!inputElement) throw new Error("找不到酒馆原生组件: " + inputId);
-        
-        // 替换文件并触发原生 change 事件
-        inputElement.files = dataTransfer.files;
-        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
-        
-        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的裁剪窗口中确认");
-        $btn.html('<i class="fa-solid fa-check"></i> 成功');
 
-        if (targetType === 'persona') {
-            $('#extensions-settings-button .drawer-toggle').click(); // 关闭扩展侧边栏看弹窗
-        }
-    } catch (e) {
-        console.error(e);
-        toast.error("应用图片失败: " + e.message);
-        $btn.html('<i class="fa-solid fa-xmark"></i> 失败');
-    } finally {
-        setTimeout(() => $btn.html(originalHtml).css('pointer-events', 'auto'), 2000);
-    }
-}
-
-// 弹出 Persona 选择器 (解决新建User问题)
-function showPersonaSelector(imgUrl, $btn) {
-    const personas = [];
-    // 抓取酒馆中所有的 Persona
-    $('#user_avatar_block .avatar-container').each(function(idx) {
-        const name = $(this).find('.ch_name').text();
-        if (name && name !== "+++") personas.push({ name, el: this });
-    });
-
-    if (personas.length === 0) {
-        toast.error("未找到任何已有 Persona！");
-        return;
-    }
-
-    const optionsHtml = personas.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
-    
-    const selectorHtml = `
-        <div class="museum-persona-selector" style="margin-top: 5px; padding: 5px; background: rgba(0,0,0,0.5); border-radius: 4px; border: 1px solid var(--SmartThemeBorderColor); z-index:999; position:relative;">
-            <div style="font-size:0.8em; margin-bottom:4px; color:white;">选择要更改头像的 User:</div>
-            <select class="text_pole" style="width: 100%; margin-bottom: 5px; background: white; color: black;">${optionsHtml}</select>
-            <div style="display: flex; gap: 5px;">
-                <button class="museum-action-btn confirm-persona" style="background: #4CAF50; color: white;">确认更改</button>
-                <button class="museum-action-btn cancel-persona" style="background: #f44336; color: white;">取消</button>
-            </div>
-        </div>
-    `;
-    
-    const $btnGroup = $btn.parent();
-    $btnGroup.hide();
-    $btnGroup.after(selectorHtml);
-    
-    const $selector = $btnGroup.next('.museum-persona-selector');
-    
-    $selector.find('.cancel-persona').on('click', (e) => {
-        e.stopPropagation();
-        $selector.remove();
-        $btnGroup.show();
-    });
-    
-    $selector.find('.confirm-persona').on('click', async (e) => {
-        e.stopPropagation();
-        const selectedIdx = $selector.find('select').val();
-        const selectedPersona = personas[selectedIdx];
-        
-        $selector.remove();
-        $btnGroup.show();
-        
-        // 【核心修复1】点击选中这个 Persona (触发ST内部选中状态)
-        $(selectedPersona.el).click();
-        
-        // 等待 ST UI 响应完成
-        await new Promise(r => setTimeout(r, 300));
-        
-        // 【核心修复2】强制填入覆写字段！只要这个字段有名字，酒馆就不会新建 User
-        $('#avatar_upload_overwrite').val(selectedPersona.name);
-        
-        // 开始下载图片并触发上传事件
-        applyImageToTarget(imgUrl, 'persona', $btn);
-    });
-}
-
-// 在酒馆原生界面注入“从图库选择”的快捷按钮 (解决点不动的问题)
-function injectMuseumHooks() {
-    // 1. 在背景面板注入
-    if (!$('#museum-hook-bg').length) {
-        const bgHtml = `<button type="button" id="museum-hook-bg" class="menu_button menu_button_icon" title="从博物馆选择背景" style="color: var(--SmartThemeQuoteColor);"><i class="fa-solid fa-building-columns"></i><span>图库选择</span></button>`;
-        $('#add_background_button_top').before(bgHtml);
-        
-        // 改用直接绑定 document 的事件，防止被 ST 其他事件拦截
-        $(document).on('click', '#museum-hook-bg', function(e) {
-            e.preventDefault();
-            // 收起背景面板
-            if ($('#Backgrounds').hasClass('openDrawer') || $('#backgrounds-button').hasClass('openDrawer')) {
-                $('#backgrounds-drawer-toggle').click();
-            }
-            // 展开扩展面板
-            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
-                $('#extensions-settings-button > .drawer-toggle').click();
-            }
-            // 自动切到图片Tab
-            setTimeout(() => {
-                $('.museum-filter-btn[data-filter="image"]').click();
-                $('#museum-extensions-container')[0]?.scrollIntoView({behavior: "smooth"});
-            }, 300);
-        });
-    }
-
-    // 2. 在 Persona 面板注入
-    if (!$('#museum-hook-persona').length) {
-        const personaHtml = `<div id="museum-hook-persona" class="menu_button fa-solid fa-building-columns" title="从博物馆图库选择头像" style="color: var(--SmartThemeQuoteColor);"></div>`;
-        $('#persona_set_image_button').after(personaHtml);
-        
-        $(document).on('click', '#museum-hook-persona', function(e) {
-            e.preventDefault();
-            // 收起Persona面板
-            if ($('#PersonaManagement').hasClass('openDrawer') || $('#persona-management-button').hasClass('openDrawer')) {
-                $('#persona-management-button > .drawer-toggle').click();
-            }
-            // 展开扩展面板
-            if ($('#rm_extensions_block').hasClass('closedDrawer')) {
-                $('#extensions-settings-button > .drawer-toggle').click();
-            }
-            // 自动切到图片Tab
-            setTimeout(() => {
-                $('.museum-filter-btn[data-filter="image"]').click();
-                $('#museum-extensions-container')[0]?.scrollIntoView({behavior: "smooth"});
-            }, 300);
-        });
-    }
-}
 
 // ====== 新增：一键抓取并上传主题功能 (手机端特化防弹版) ======
 async function handleAutoCaptureTheme() {

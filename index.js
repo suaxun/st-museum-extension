@@ -1534,7 +1534,7 @@ function initializePlugin() {
         
         // 切换数量后，清空搜索和标签状态并重新加载
         currentSearchQuery = '';
-        currentSelectedTag = '';
+        currentSelectedTags = [];
         $('#museum-search-input').val('');
         refreshGallery();
     });
@@ -1562,7 +1562,7 @@ function initializePlugin() {
         currentFilter = $(this).data('filter');
         
         currentSearchQuery = '';
-        currentSelectedTag = '';
+        currentSelectedTags = []; // 👈 改成空数组
         $('#museum-search-input').val('');
         
         refreshGallery();

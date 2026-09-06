@@ -978,125 +978,82 @@ async function handleAutoCaptureTheme() {
 
 
         // ==========================================
-        // 2. 截图聊天界面 (手机端特化优化)
+        // 2. 截图聊天界面 (电脑自动截图，手机手动选图)
         // ==========================================
-        $btn.html('<i class="fa-solid fa-camera fa-spin"></i> 正在截取聊天预览图...');
-        toast.info("正在抓取界面，请稍候...", 2000);
-        
-        if (!window.html2canvas) {
-            await new Promise((res, rej) => {
-                const script = document.createElement('script');
-                script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-                script.onload = res;
-                script.onerror = rej;
-                document.head.appendChild(script);
-            });
-        }
-
-        // 判断是否为移动端
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-        const $hiddenElements = $('.drawer, #top-bar, #toast-container, #movingDivs');
-        $hiddenElements.hide(); 
-        
-        // 给点时间让界面重绘
-        await new Promise(r => setTimeout(r, 500)); 
-
         let imgBlob;
-        try {
-            // 【手机端特化】如果是在手机上，只截图 #chat 聊天框，不截全屏
-            const targetElement = isMobile ? (document.getElementById('chat') || document.body) : document.body;
 
-            const canvasOptions = {
-                useCORS: true,
-                allowTaint: false,
-                backgroundColor: null,
-                scale: isMobile ? 1 : (window.devicePixelRatio || 1), // 手机强制 1 倍分辨率防 OOM
-                logging: false,
-                onclone: (clonedDoc) => {
-                    // 1. 隐藏多余 UI
-                    clonedDoc.querySelectorAll('.drawer, #top-bar, #toast-container, #movingDivs').forEach(el => {
-                        el.style.setProperty('display', 'none', 'important');
-                    });
+        if (isMobile) {
+            // 【手机端逻辑：调用系统相册手动选图】
+            $btn.html('<i class="fa-solid fa-image"></i> 请选择预览图...');
+            toast.info("为防止手机浏览器崩溃，请手动选择一张图片作为主题预览图", 5000);
+            
+            // 恢复隐藏的 UI，以免用户选图时界面看起来怪异
+            $('.drawer, #top-bar, #toast-container, #movingDivs').show();
 
-                    // 2. 移除模糊滤镜，防止 html2canvas 报错透明
-                    const fixStyle = clonedDoc.createElement('style');
-                    fixStyle.innerHTML = `* { backdrop-filter: none !important; }`;
-                    clonedDoc.head.appendChild(fixStyle);
-
-                    // ========================================================
-                    // 3. 【核心修复】洗白所有 html2canvas 不支持的高级 CSS 颜色函数 (支持无限嵌套)
-                    // ========================================================
-                    const sanitizeCSSColors = (cssText) => {
-                        if (!cssText) return cssText;
-                        const keywords = ['color', 'color-mix', 'lab', 'lch', 'oklab', 'oklch', 'hwb'];
-                        let result = cssText;
-                        for (const kw of keywords) {
-                            // 匹配关键字 (忽略大小写)
-                            const regex = new RegExp('\\b' + kw + '\\s*\\(', 'gi');
-                            let match;
-                            // 使用 while 循环逐个替换，确保无限次嵌套也能被正确消除
-                            while ((match = regex.exec(result)) !== null) {
-                                let startIdx = match.index;
-                                let openBrackets = 0;
-                                let endIdx = -1;
-                                
-                                // 从关键字后的第一个 '(' 开始寻找对应的 ')'
-                                let bracketStart = result.indexOf('(', startIdx);
-                                if (bracketStart === -1) break;
-
-                                for (let i = bracketStart; i < result.length; i++) {
-                                    if (result[i] === '(') openBrackets++;
-                                    if (result[i] === ')') {
-                                        openBrackets--;
-                                        if (openBrackets === 0) {
-                                            endIdx = i;
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                if (endIdx !== -1) {
-                                    // 找到成对的括号，将整个不受支持的函数替换为安全灰色
-                                    result = result.substring(0, startIdx) + 'rgba(128, 128, 128, 0.5)' + result.substring(endIdx + 1);
-                                    regex.lastIndex = 0; // 重置正则，防止字符串长度变化导致匹配漏掉
-                                } else {
-                                    break; // 括号不匹配（语法错误的情况），强行跳出避免死循环
-                                }
-                            }
-                        }
-                        return result;
-                    };
-
-                    // 清洗所有的 <style> 标签
-                    clonedDoc.querySelectorAll('style').forEach(style => {
-                        if (style.innerHTML) {
-                            style.innerHTML = sanitizeCSSColors(style.innerHTML);
-                        }
-                    });
-
-                    // 清洗所有 DOM 元素的行内样式 (直接修改 attribute 更底层，防止浏览器自作聪明)
-                    clonedDoc.querySelectorAll('*').forEach(el => {
-                        const styleAttr = el.getAttribute('style');
-                        if (styleAttr) {
-                            el.setAttribute('style', sanitizeCSSColors(styleAttr));
-                        }
-                    });
-
-                    // 4. 处理图片跨域与占位符问题
-                    if (isMobile) {
-                        // 【手机端终极防护】强行把所有图片替换成透明占位符，阻断外网图片请求防卡死
-                        const dummyImg = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-                        clonedDoc.querySelectorAll('img').forEach(img => {
-                            img.src = dummyImg;
-                            img.style.backgroundColor = 'var(--SmartThemeQuoteColor, #cccccc)';
-                        });
-                        clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
-                            el.style.backgroundImage = 'none';
-                            el.style.backgroundColor = 'var(--SmartThemeQuoteColor, #cccccc)';
-                        });
+            imgBlob = await new Promise((resolve, reject) => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'image/*';
+                
+                fileInput.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        resolve(file); // File 对象本身就是 Blob 的子类，可直接上传
                     } else {
-                        // 【PC端】依然走图床代理路线保留原图
+                        reject(new Error("用户取消了选择图片"));
+                    }
+                };
+                
+                // 触发手机文件选择器
+                fileInput.click();
+                
+                // 简单的防死锁：如果用户离开窗口又回来但不选图，给个提示
+                window.addEventListener('focus', function onFocus() {
+                    setTimeout(() => {
+                        window.removeEventListener('focus', onFocus);
+                        if (!fileInput.value) {
+                            console.log("用户可能取消了文件选择");
+                        }
+                    }, 500);
+                }, { once: true });
+            });
+
+        } else {
+            // 【PC端逻辑：继续使用 html2canvas 全自动无感截图】
+            $btn.html('<i class="fa-solid fa-camera fa-spin"></i> 正在截取聊天预览图...');
+            toast.info("正在抓取界面，请稍候...", 2000);
+            
+            if (!window.html2canvas) {
+                await new Promise((res, rej) => {
+                    const script = document.createElement('script');
+                    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+                    script.onload = res;
+                    script.onerror = rej;
+                    document.head.appendChild(script);
+                });
+            }
+
+            const $hiddenElements = $('.drawer, #top-bar, #toast-container, #movingDivs');
+            $hiddenElements.hide(); 
+            await new Promise(r => setTimeout(r, 500)); // 等待重绘
+
+            try {
+                const canvasOptions = {
+                    useCORS: true,
+                    allowTaint: false,
+                    backgroundColor: null,
+                    scale: window.devicePixelRatio || 1,
+                    logging: false,
+                    onclone: (clonedDoc) => {
+                        clonedDoc.querySelectorAll('.drawer, #top-bar, #toast-container, #movingDivs').forEach(el => {
+                            el.style.setProperty('display', 'none', 'important');
+                        });
+                        const fixStyle = clonedDoc.createElement('style');
+                        fixStyle.innerHTML = `* { backdrop-filter: none !important; }`;
+                        clonedDoc.head.appendChild(fixStyle);
+                        
+                        // 图床代理处理跨域
                         clonedDoc.querySelectorAll('[style*="background-image"]').forEach(el => {
                             if (el.style && el.style.backgroundImage && el.style.backgroundImage.includes('url(')) {
                                 el.style.backgroundImage = el.style.backgroundImage.replace(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/gi, (match, imgUrl) => {
@@ -1106,29 +1063,22 @@ async function handleAutoCaptureTheme() {
                             }
                         });
                     }
+                };
+
+                const canvas = await html2canvas(document.body, canvasOptions);
+                imgBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                
+                if (imgBlob.size < 10000) {
+                    throw new Error("截取到了无效的图片");
                 }
-            };
-
-
-            // 如果是手机端，限制最大高度为当前屏幕高度，防止聊天记录过长撑爆内存
-            if (isMobile) {
-                canvasOptions.height = Math.min(targetElement.scrollHeight, window.innerHeight);
-                canvasOptions.windowHeight = window.innerHeight;
+            } catch (err) {
+                console.error(err);
+                throw new Error("PC端截图失败: " + err.message);
+            } finally {
+                $hiddenElements.show(); 
             }
-
-            const canvas = await html2canvas(targetElement, canvasOptions);
-            imgBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-            
-            if (imgBlob.size < 10000) {
-                throw new Error("截取到了无效的透明图片。");
-            }
-            
-        } catch (err) {
-            console.error(err);
-            throw new Error("截图失败: " + err.message);
-        } finally {
-            $hiddenElements.show(); 
         }
+
 
         // ==========================================
         // 3. 上传到 Supabase 存储桶

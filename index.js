@@ -5,12 +5,12 @@ const EXTENSION_ID = "museum-extension-root"; // 唯一的 DOM ID
 // 全局变量
 let supabase = null;
 let session = null;
-let currentFilter = 'all';
+let currentFilter = 'role_card'; // 默认直接显示“角色”
 let keepAliveTimer = null; 
 // 【新增：用于搜索和标签过滤的变量】
 let allFetchedItems = []; // 缓存当前分类下的所有数据
 let currentSearchQuery = ''; // 当前搜索词
-let currentSelectedTag = ''; // 当前选中的标签
+let currentSelectedTags = []; // 【修改】当前选中的标签（数组，支持多选）
 // --- 核心工具函数 ---
 
 // 获取 ST 上下文
@@ -526,12 +526,9 @@ async function refreshGallery() {
             query = query.limit(parseInt(limitVal, 10));
         }
         
-// 找到这部分代码并完全替换：
-        if (currentFilter !== 'all') {
-            query = query.eq('type', currentFilter);
-        } else {
-            query = query.in('type', ['role_card', 'beautify', 'image']);
-        }
+        // 直接根据当前的过滤条件查询
+        query = query.eq('type', currentFilter);
+
 
         // --- 新增：如果是图片类型，检查有没有选中特定的相册 ---
         if (currentFilter === 'image') {
@@ -566,7 +563,7 @@ async function refreshGallery() {
             return item;
         });
 
-        currentSelectedTag = '';
+        currentSelectedTags = [];
         $('#museum-search-input').val(currentSearchQuery);
         applyFiltersAndRender();
 
@@ -601,13 +598,17 @@ function applyFiltersAndRender() {
     });
     const availableTags = Array.from(tagSet).sort();
 
-    // 3. 标签匹配过滤
-    if (currentSelectedTag) {
-        // 如果当前选中的标签因为搜索被过滤掉了，就取消选中
-        if (!availableTags.includes(currentSelectedTag)) {
-            currentSelectedTag = '';
-        } else {
-            filtered = filtered.filter(item => item._parsed && item._parsed.tags && item._parsed.tags.includes(currentSelectedTag));
+    // 3. 标签多选匹配过滤
+    if (currentSelectedTags.length > 0) {
+        // 过滤掉因为搜索而失效的标签 (保持与搜索框的联动)
+        currentSelectedTags = currentSelectedTags.filter(tag => availableTags.includes(tag));
+
+        if (currentSelectedTags.length > 0) {
+            filtered = filtered.filter(item => {
+                const itemTags = (item._parsed && item._parsed.tags) ? item._parsed.tags : [];
+
+               return currentSelectedTags.some(selectedTag => itemTags.includes(selectedTag));
+            });
         }
     }
 
@@ -624,15 +625,17 @@ function renderTags(tags) {
     if (tags.length === 0) return;
 
     tags.forEach(tag => {
-        const isActive = tag === currentSelectedTag ? 'active' : '';
+        // 判断当前标签是否在已选数组中
+        const isActive = currentSelectedTags.includes(tag) ? 'active' : '';
         const $btn = $(`<div class="museum-tag ${isActive}">${tag}</div>`);
         
         $btn.on('click', () => {
-            // 点击标签：如果已选中则取消，如果未选中则选中
-            if (currentSelectedTag === tag) {
-                currentSelectedTag = ''; 
+            if (currentSelectedTags.includes(tag)) {
+                // 如果已选中，则从数组中移除 (取消选中)
+                currentSelectedTags = currentSelectedTags.filter(t => t !== tag);
             } else {
-                currentSelectedTag = tag; 
+                // 如果未选中，则推入数组 (追加多选)
+                currentSelectedTags.push(tag);
             }
             applyFiltersAndRender();
         });
@@ -1428,8 +1431,7 @@ function createSettingsHtml() {
             </div>
 
             <div class="museum-filter-bar">
-                <div class="museum-filter-btn active" data-filter="all">全部</div>
-                <div class="museum-filter-btn" data-filter="role_card">角色</div>
+                <div class="museum-filter-btn active" data-filter="role_card">角色</div>
                 <div class="museum-filter-btn" data-filter="beautify">美化</div>
                 <div class="museum-filter-btn" data-filter="image">图片/相册</div>
             </div>

@@ -441,3 +441,80 @@
     border-color: var(--SmartThemeQuoteColor);
     font-weight: bold;
 }
+/* === 优化的 Persona 可视化选择器 === */
+.museum-persona-selector-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: var(--SmartThemeBgColor);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    box-sizing: border-box;
+    border-radius: 6px;
+}
+
+.museum-persona-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: var(--SmartThemeBodyColor);
+}
+
+.museum-persona-close {
+    cursor: pointer;
+    padding: 4px;
+    opacity: 0.7;
+}
+.museum-persona-close:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
+
+/* 横向滚动的头像列表 */
+.museum-persona-grid {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    /* 隐藏滚动条但保留滚动功能 */
+    scrollbar-width: none; 
+}
+.museum-persona-grid::-webkit-scrollbar { display: none; }
+
+.museum-persona-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    width: 60px;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+
+.museum-persona-item:hover {
+    transform: translateY(-3px);
+}
+
+.museum-persona-item img {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%; /* 圆形头像 */
+    object-fit: cover;
+    border: 2px solid var(--SmartThemeBorderColor);
+}
+
+.museum-persona-item:hover img {
+    border-color: var(--SmartThemeQuoteColor);
+}
+
+.museum-persona-item span {
+    font-size: 0.75em;
+    text-align: center;
+    width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--SmartThemeBodyColor);
+}

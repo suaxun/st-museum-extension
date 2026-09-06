@@ -761,11 +761,11 @@ function renderItems(items) {
                     
                     <div class="museum-btn-group">
                         ${item.type === 'image' ? `
-                            <div class="museum-action-btn set-bg-btn" style="background-color: #2196F3; color: white; border: none;">
-                                <i class="fa-solid fa-panorama"></i> 设背景
+                            <div class="museum-action-btn set-bg-btn" title="设为背景">
+                                <i class="fa-solid fa-panorama"></i> 背景
                             </div>
-                            <div class="museum-action-btn set-persona-btn" style="background-color: #4CAF50; color: white; border: none;">
-                                <i class="fa-solid fa-user"></i> 设Persona
+                            <div class="museum-action-btn set-persona-btn" title="设为Persona头像">
+                                <i class="fa-solid fa-user"></i> 头像
                             </div>
                         ` : `
                             <div class="museum-action-btn import-btn">
@@ -912,13 +912,17 @@ async function applyImageToTarget(url, targetType, $btn) {
     }
 }
 
-// 2. 弹出 Persona 选择器 (解决每次都新建User的问题)
+// 2. 弹出 Persona 选择器 (可视化头像版)
 function showPersonaSelector(imgUrl, $btn) {
     const personas = [];
-    // 抓取酒馆中所有的 Persona
+    // 抓取酒馆中所有的 Persona，这次连图片 src 一起抓
     $('#user_avatar_block .avatar-container').each(function(idx) {
         const name = $(this).find('.ch_name').text();
-        if (name && name !== "+++") personas.push({ name, el: this });
+        const avatarSrc = $(this).find('.avatar img').attr('src'); // 获取头像图片
+        
+        if (name && name !== "+++") {
+            personas.push({ name, avatarSrc, el: this });
+        }
     });
 
     if (personas.length === 0) {
@@ -926,38 +930,47 @@ function showPersonaSelector(imgUrl, $btn) {
         return;
     }
 
-    const optionsHtml = personas.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
+    // 生成带头像的 HTML 列表
+    const gridHtml = personas.map((p, i) => `
+        <div class="museum-persona-item" data-idx="${i}" title="${p.name}">
+            <img src="${p.avatarSrc}" onerror="this.src='img/ai4.png'">
+            <span>${p.name}</span>
+        </div>
+    `).join('');
     
+    // 生成覆盖层 UI
     const selectorHtml = `
-        <div class="museum-persona-selector" style="margin-top: 5px; padding: 8px; background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.5)); border-radius: 4px; border: 1px solid var(--SmartThemeBorderColor); z-index:999; position:relative;">
-            <div style="font-size:0.8em; margin-bottom:4px; color: var(--SmartThemeBodyColor, white);">选择要更改头像的 User:</div>
-            <select class="text_pole" style="width: 100%; margin-bottom: 8px;">${optionsHtml}</select>
-            <div style="display: flex; gap: 5px;">
-                <button class="museum-action-btn confirm-persona" style="background: #4CAF50; color: white; border:none; padding:4px;">确认更改</button>
-                <button class="museum-action-btn cancel-persona" style="background: #f44336; color: white; border:none; padding:4px;">取消</button>
+        <div class="museum-persona-selector-overlay">
+            <div class="museum-persona-header">
+                <span>更换谁的头像？</span>
+                <i class="fa-solid fa-xmark museum-persona-close"></i>
+            </div>
+            <div class="museum-persona-grid">
+                ${gridHtml}
             </div>
         </div>
     `;
     
-    const $btnGroup = $btn.parent();
-    $btnGroup.hide();
-    $btnGroup.after(selectorHtml);
+    // 找到当前卡片的根节点 .museum-item，把选择器盖在上面
+    const $card = $btn.closest('.museum-item');
+    $card.append(selectorHtml);
     
-    const $selector = $btnGroup.next('.museum-persona-selector');
+    const $selector = $card.find('.museum-persona-selector-overlay');
     
-    $selector.find('.cancel-persona').on('click', (e) => {
+    // 绑定关闭按钮
+    $selector.find('.museum-persona-close').on('click', (e) => {
         e.stopPropagation();
         $selector.remove();
-        $btnGroup.show();
     });
     
-    $selector.find('.confirm-persona').on('click', async (e) => {
+    // 绑定点击头像直接应用 (省去确认按钮)
+    $selector.find('.museum-persona-item').on('click', async function(e) {
         e.stopPropagation();
-        const selectedIdx = $selector.find('select').val();
+        const selectedIdx = $(this).data('idx');
         const selectedPersona = personas[selectedIdx];
         
-        $selector.remove();
-        $btnGroup.show();
+        // 视觉反馈
+        $(this).css('opacity', '0.5');
         
         // 【核心修复1】点击选中这个 Persona (触发ST内部选中状态)
         $(selectedPersona.el).click();
@@ -968,10 +981,14 @@ function showPersonaSelector(imgUrl, $btn) {
         // 【核心修复2】强制填入覆写字段！只要这个字段有名字，酒馆就不会新建 User
         $('#avatar_upload_overwrite').val(selectedPersona.name);
         
+        // 移除选择器面板
+        $selector.remove();
+        
         // 开始下载图片并触发上传事件
         applyImageToTarget(imgUrl, 'persona', $btn);
     });
 }
+
 
 // 3. 在酒馆原生界面注入“从图库选择”的快捷按钮 (解决点不动的问题)
 function injectMuseumHooks() {

@@ -1025,23 +1025,61 @@ async function handleAutoCaptureTheme() {
                     clonedDoc.head.appendChild(fixStyle);
 
                     // ========================================================
-                    // 3. 【核心修复】洗白所有 html2canvas 不支持的高级 CSS 颜色函数
+                    // 3. 【核心修复】洗白所有 html2canvas 不支持的高级 CSS 颜色函数 (支持无限嵌套)
                     // ========================================================
-                    // 匹配如 color(), color-mix(), lab(), lch() 等函数，支持内部有一层嵌套(如 var(--xx))
-                    const unsupportedColorRegex = /(color|color-mix|lab|lch|oklab|oklch|hwb)\((?:[^)(]+|\([^)(]*\))*\)/gi;
-                    const safeFallbackColor = 'rgba(128, 128, 128, 0.5)'; // 替换为安全的半透明灰色
+                    const sanitizeCSSColors = (cssText) => {
+                        if (!cssText) return cssText;
+                        const keywords = ['color', 'color-mix', 'lab', 'lch', 'oklab', 'oklch', 'hwb'];
+                        let result = cssText;
+                        for (const kw of keywords) {
+                            // 匹配关键字 (忽略大小写)
+                            const regex = new RegExp('\\b' + kw + '\\s*\\(', 'gi');
+                            let match;
+                            // 使用 while 循环逐个替换，确保无限次嵌套也能被正确消除
+                            while ((match = regex.exec(result)) !== null) {
+                                let startIdx = match.index;
+                                let openBrackets = 0;
+                                let endIdx = -1;
+                                
+                                // 从关键字后的第一个 '(' 开始寻找对应的 ')'
+                                let bracketStart = result.indexOf('(', startIdx);
+                                if (bracketStart === -1) break;
+
+                                for (let i = bracketStart; i < result.length; i++) {
+                                    if (result[i] === '(') openBrackets++;
+                                    if (result[i] === ')') {
+                                        openBrackets--;
+                                        if (openBrackets === 0) {
+                                            endIdx = i;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if (endIdx !== -1) {
+                                    // 找到成对的括号，将整个不受支持的函数替换为安全灰色
+                                    result = result.substring(0, startIdx) + 'rgba(128, 128, 128, 0.5)' + result.substring(endIdx + 1);
+                                    regex.lastIndex = 0; // 重置正则，防止字符串长度变化导致匹配漏掉
+                                } else {
+                                    break; // 括号不匹配（语法错误的情况），强行跳出避免死循环
+                                }
+                            }
+                        }
+                        return result;
+                    };
 
                     // 清洗所有的 <style> 标签
                     clonedDoc.querySelectorAll('style').forEach(style => {
-                        if (style.innerHTML && style.innerHTML.match(unsupportedColorRegex)) {
-                            style.innerHTML = style.innerHTML.replace(unsupportedColorRegex, safeFallbackColor);
+                        if (style.innerHTML) {
+                            style.innerHTML = sanitizeCSSColors(style.innerHTML);
                         }
                     });
 
-                    // 清洗所有 DOM 元素的行内样式 (style="...")
+                    // 清洗所有 DOM 元素的行内样式 (直接修改 attribute 更底层，防止浏览器自作聪明)
                     clonedDoc.querySelectorAll('*').forEach(el => {
-                        if (el.style && el.style.cssText && el.style.cssText.match(unsupportedColorRegex)) {
-                            el.style.cssText = el.style.cssText.replace(unsupportedColorRegex, safeFallbackColor);
+                        const styleAttr = el.getAttribute('style');
+                        if (styleAttr) {
+                            el.setAttribute('style', sanitizeCSSColors(styleAttr));
                         }
                     });
 

@@ -870,9 +870,8 @@ function renderItems(items) {
     });
 }
 // ================= 核心逻辑：图片应用与快捷按钮注入 =================
-
-// 1. 将网络图片转换为 File 对象并推给酒馆组件
-async function applyImageToTarget(url, targetType, $btn) {
+// 1. 将网络图片转换为 File 对象并推给酒馆组件 (新增 personaName 参数)
+async function applyImageToTarget(url, targetType, $btn, personaName = null) {
     const originalHtml = $btn.html();
     $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
     
@@ -892,11 +891,19 @@ async function applyImageToTarget(url, targetType, $btn) {
         const inputElement = document.getElementById(inputId);
         if (!inputElement) throw new Error("找不到酒馆原生组件: " + inputId);
         
-        // 替换文件并触发原生 change 事件
+        // 替换文件
         inputElement.files = dataTransfer.files;
-        inputElement.dispatchEvent(new Event('change', { bubbles: true }));
         
-        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的裁剪窗口中确认");
+        // 【核心修复】必须在 fetch 下载完成、即将触发 change 的前一刻填入名字！
+        // 否则在网络下载期间，ST 自身的 UI 刷新逻辑会把这个隐藏字段清空，导致裁剪后无法保存。
+        if (targetType === 'persona' && personaName) {
+            $('#avatar_upload_overwrite').val(personaName);
+        }
+        
+        // 使用 jQuery trigger 触发，确保酒馆绑定的事件能完美监听到
+        $(inputElement).trigger('change');
+        
+        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的裁剪窗口中确认保存");
         $btn.html('<i class="fa-solid fa-check"></i> 成功');
 
         if (targetType === 'persona') {
@@ -915,10 +922,10 @@ async function applyImageToTarget(url, targetType, $btn) {
 // 2. 弹出 Persona 选择器 (可视化头像版)
 function showPersonaSelector(imgUrl, $btn) {
     const personas = [];
-    // 抓取酒馆中所有的 Persona，这次连图片 src 一起抓
+    // 抓取酒馆中所有的 Persona
     $('#user_avatar_block .avatar-container').each(function(idx) {
         const name = $(this).find('.ch_name').text();
-        const avatarSrc = $(this).find('.avatar img').attr('src'); // 获取头像图片
+        const avatarSrc = $(this).find('.avatar img').attr('src'); 
         
         if (name && name !== "+++") {
             personas.push({ name, avatarSrc, el: this });
@@ -951,41 +958,30 @@ function showPersonaSelector(imgUrl, $btn) {
         </div>
     `;
     
-    // 找到当前卡片的根节点 .museum-item，把选择器盖在上面
     const $card = $btn.closest('.museum-item');
     $card.append(selectorHtml);
-    
     const $selector = $card.find('.museum-persona-selector-overlay');
     
-    // 绑定关闭按钮
     $selector.find('.museum-persona-close').on('click', (e) => {
         e.stopPropagation();
         $selector.remove();
     });
     
-    // 绑定点击头像直接应用 (省去确认按钮)
-    $selector.find('.museum-persona-item').on('click', async function(e) {
+    $selector.find('.museum-persona-item').on('click', function(e) {
         e.stopPropagation();
         const selectedIdx = $(this).data('idx');
         const selectedPersona = personas[selectedIdx];
         
-        // 视觉反馈
         $(this).css('opacity', '0.5');
         
-        // 【核心修复1】点击选中这个 Persona (触发ST内部选中状态)
+        // 点击选中这个 Persona (触发ST内部选中状态)
         $(selectedPersona.el).click();
-        
-        // 等待 ST UI 响应完成
-        await new Promise(r => setTimeout(r, 300));
-        
-        // 【核心修复2】强制填入覆写字段！只要这个字段有名字，酒馆就不会新建 User
-        $('#avatar_upload_overwrite').val(selectedPersona.name);
         
         // 移除选择器面板
         $selector.remove();
         
-        // 开始下载图片并触发上传事件
-        applyImageToTarget(imgUrl, 'persona', $btn);
+        // 【核心修复】将选中的 persona 名字传递给 applyImageToTarget 函数
+        applyImageToTarget(imgUrl, 'persona', $btn, selectedPersona.name);
     });
 }
 

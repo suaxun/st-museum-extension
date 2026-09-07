@@ -871,7 +871,7 @@ function renderItems(items) {
 }
 // ================= 核心逻辑：图片应用与快捷按钮注入 =================
 // 1. 将网络图片转换为 File 对象并推给酒馆组件
-async function applyImageToTarget(url, targetType, $btn, personaName = null) {
+async function applyImageToTarget(url, targetType, $btn, personaFilename = null) {
     const originalHtml = $btn.html();
     $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
     
@@ -880,7 +880,6 @@ async function applyImageToTarget(url, targetType, $btn, personaName = null) {
         if (!res.ok) throw new Error("图片下载失败");
         const blob = await res.blob();
         
-        // 【核心修复2】强制更正 MIME 类型。防止图床返回 octet-stream 导致酒馆裁剪器拒绝保存
         let mimeType = blob.type;
         if (!mimeType || !mimeType.startsWith('image/')) {
             const extMatch = url.match(/\.(png|jpg|jpeg|webp|gif)\b/i);
@@ -902,38 +901,31 @@ async function applyImageToTarget(url, targetType, $btn, personaName = null) {
         // 替换文件
         inputElement.files = dataTransfer.files;
         
-        // 【核心修复3】彻底锁定 overwrite_name
+        // 【核心修复】死锁保护：填入底层文件名 (如 1111.png) 而不是显示名称
         let lockInterval = null;
-        if (targetType === 'persona' && personaName) {
+        if (targetType === 'persona' && personaFilename) {
             const overwriteInput = document.getElementById('avatar_upload_overwrite');
             if (overwriteInput) {
-                overwriteInput.value = personaName;
+                overwriteInput.value = personaFilename;
                 
-                // 【终极死锁】防止酒馆在弹窗期间因刷新等原因暗中清空这个字段，每100毫秒强制写回！
                 lockInterval = setInterval(() => {
-                    if (overwriteInput.value !== personaName) {
-                        overwriteInput.value = personaName;
+                    if (overwriteInput.value !== personaFilename) {
+                        overwriteInput.value = personaFilename;
                     }
                 }, 100);
                 
-                // 15秒后自动清理死锁（用户裁剪一般不会超过这么久）
                 setTimeout(() => {
                     if (lockInterval) clearInterval(lockInterval);
                 }, 15000);
             }
-            
-            // 同步更新一下酒馆UI显示的当前Persona名字，防止错位
-            $('#your_name').text(personaName);
         }
         
-        // 使用原生事件触发，兼容性最强
+        // 触发酒馆原生上传/裁剪事件
         const changeEvent = new Event('change', { bubbles: true });
         inputElement.dispatchEvent(changeEvent);
         
         toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的窗口确认裁剪！");
         $btn.html('<i class="fa-solid fa-check"></i> 成功');
-
-        // 注意：这里不再自动收起扩展面板了，防止收起面板触发酒馆重绘导致状态丢失
 
     } catch (e) {
         console.error(e);
@@ -947,13 +939,24 @@ async function applyImageToTarget(url, targetType, $btn, personaName = null) {
 // 2. 弹出 Persona 选择器 (可视化头像版)
 function showPersonaSelector(imgUrl, $btn) {
     const personas = [];
-    // 抓取酒馆中所有的 Persona
+    // 抓取酒馆中所有的 Persona，这次连图片底层路径一起抓
     $('#user_avatar_block .avatar-container').each(function(idx) {
         const name = $(this).find('.ch_name').text();
         const avatarSrc = $(this).find('.avatar img').attr('src'); 
         
+        let filename = null;
+        if (avatarSrc) {
+            try {
+                // 从酒馆的缩略图API中提取真实的底层文件名
+                const urlObj = new URL(avatarSrc, window.location.origin);
+                filename = urlObj.searchParams.get('file');
+            } catch(e) {
+                console.warn("无法解析头像URL", e);
+            }
+        }
+        
         if (name && name !== "+++") {
-            personas.push({ name, avatarSrc, el: this });
+            personas.push({ name, avatarSrc, filename, el: this });
         }
     });
 
@@ -962,7 +965,6 @@ function showPersonaSelector(imgUrl, $btn) {
         return;
     }
 
-    // 生成带头像的 HTML 列表
     const gridHtml = personas.map((p, i) => `
         <div class="museum-persona-item" data-idx="${i}" title="${p.name}">
             <img src="${p.avatarSrc}" onerror="this.src='img/ai4.png'">
@@ -970,7 +972,6 @@ function showPersonaSelector(imgUrl, $btn) {
         </div>
     `).join('');
     
-    // 生成覆盖层 UI
     const selectorHtml = `
         <div class="museum-persona-selector-overlay">
             <div class="museum-persona-header">
@@ -997,20 +998,24 @@ function showPersonaSelector(imgUrl, $btn) {
         const selectedIdx = $(this).data('idx');
         const selectedPersona = personas[selectedIdx];
         
+        if (!selectedPersona.filename) {
+            toast.error("无法获取该 Persona 的底层文件，更换失败");
+            return;
+        }
+
         $(this).css('opacity', '0.5');
         $selector.find('.museum-persona-header span').text('正在拉取状态...');
         
-        // 点击选中这个 Persona (触发ST内部选中状态)
+        // 点击选中该 Persona (模拟酒馆内部切换)
         $(selectedPersona.el).click();
         
-        // 【核心修复1】必须等待酒馆内部状态完全切换完毕 (给酒馆500毫秒时间刷新UI)
+        // 等待 0.5 秒让酒馆处理完后台的角色切换逻辑
         await new Promise(r => setTimeout(r, 500));
         
-        // 移除选择器面板
         $selector.remove();
         
-        // 开始下载图片并应用
-        applyImageToTarget(imgUrl, 'persona', $btn, selectedPersona.name);
+        // 【最关键的一步】把解析出的 filename (如 1111.png) 传进去，而不是传名字
+        applyImageToTarget(imgUrl, 'persona', $btn, selectedPersona.filename);
     });
 }
 

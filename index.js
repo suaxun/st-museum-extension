@@ -898,10 +898,8 @@ async function applyImageToTarget(url, targetType, $btn, personaFilename = null)
         const inputElement = document.getElementById(inputId);
         if (!inputElement) throw new Error("找不到酒馆原生组件: " + inputId);
         
-        // 替换文件
         inputElement.files = dataTransfer.files;
         
-        // 【核心修复】死锁保护：填入底层文件名 (如 1111.png) 而不是显示名称
         let lockInterval = null;
         if (targetType === 'persona' && personaFilename) {
             const overwriteInput = document.getElementById('avatar_upload_overwrite');
@@ -920,12 +918,19 @@ async function applyImageToTarget(url, targetType, $btn, personaFilename = null)
             }
         }
         
-        // 触发酒馆原生上传/裁剪事件
         const changeEvent = new Event('change', { bubbles: true });
         inputElement.dispatchEvent(changeEvent);
         
         toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的窗口确认裁剪！");
         $btn.html('<i class="fa-solid fa-check"></i> 成功');
+
+        // 【新增修复】：触发裁剪后，自动折叠收起所有打开的酒馆侧边栏，让裁剪窗口完全暴露
+        if (targetType === 'persona') {
+            setTimeout(() => {
+                // 寻找当前处于 openDrawer 状态的面板，并模拟点击它的关闭按钮
+                $('.openDrawer').closest('.drawer').find('.drawer-toggle').trigger('click');
+            }, 150); // 稍微延迟，确保裁剪窗口已经开始渲染
+        }
 
     } catch (e) {
         console.error(e);
@@ -938,8 +943,52 @@ async function applyImageToTarget(url, targetType, $btn, personaFilename = null)
 
 // 2. 弹出 Persona 选择器 (可视化头像版)
 function showPersonaSelector(imgUrl, $btn) {
+    // 【新增修复】：注入专用的 CSS，将选择器变为手机端友好的纵向多行网格 (不再需要横向滑动)
+    if (!$('#museum-persona-styles').length) {
+        const style = `
+        <style id="museum-persona-styles">
+            .museum-persona-selector-overlay {
+                position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+                background: var(--SmartThemeBgColor); z-index: 100;
+                display: flex; flex-direction: column; padding: 10px;
+                border-radius: inherit; backdrop-filter: blur(5px);
+            }
+            .museum-persona-header {
+                display: flex; justify-content: space-between; align-items: center;
+                font-weight: bold; font-size: 0.9em; margin-bottom: 10px; flex-shrink: 0;
+                color: var(--SmartThemeBodyColor); border-bottom: 1px solid var(--SmartThemeBorderColor);
+                padding-bottom: 5px;
+            }
+            .museum-persona-close { cursor: pointer; padding: 5px; opacity: 0.7; }
+            .museum-persona-close:hover { opacity: 1; color: var(--SmartThemeQuoteColor); }
+            .museum-persona-grid {
+                display: grid;
+                /* 核心：自动排版，每列最小60px，放不下自动换行并支持纵向滚动 */
+                grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+                gap: 12px; overflow-y: auto; flex-grow: 1; align-content: start;
+                scrollbar-width: thin; padding-bottom: 10px;
+            }
+            .museum-persona-item {
+                display: flex; flex-direction: column; align-items: center;
+                gap: 5px; cursor: pointer; text-align: center; font-size: 0.75em;
+                color: var(--SmartThemeBodyColor); opacity: 0.85; transition: all 0.2s;
+            }
+            .museum-persona-item:hover { opacity: 1; }
+            .museum-persona-item img {
+                width: 45px; height: 45px; border-radius: 50%; object-fit: cover;
+                border: 2px solid var(--SmartThemeBorderColor); transition: all 0.2s;
+            }
+            .museum-persona-item:hover img {
+                border-color: var(--SmartThemeQuoteColor); transform: scale(1.1);
+            }
+            .museum-persona-item span {
+                width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            }
+        </style>`;
+        $('head').append(style);
+    }
+
     const personas = [];
-    // 抓取酒馆中所有的 Persona，这次连图片底层路径一起抓
     $('#user_avatar_block .avatar-container').each(function(idx) {
         const name = $(this).find('.ch_name').text();
         const avatarSrc = $(this).find('.avatar img').attr('src'); 
@@ -947,12 +996,9 @@ function showPersonaSelector(imgUrl, $btn) {
         let filename = null;
         if (avatarSrc) {
             try {
-                // 从酒馆的缩略图API中提取真实的底层文件名
                 const urlObj = new URL(avatarSrc, window.location.origin);
                 filename = urlObj.searchParams.get('file');
-            } catch(e) {
-                console.warn("无法解析头像URL", e);
-            }
+            } catch(e) { console.warn("无法解析头像URL", e); }
         }
         
         if (name && name !== "+++") {
@@ -1006,18 +1052,15 @@ function showPersonaSelector(imgUrl, $btn) {
         $(this).css('opacity', '0.5');
         $selector.find('.museum-persona-header span').text('正在拉取状态...');
         
-        // 点击选中该 Persona (模拟酒馆内部切换)
         $(selectedPersona.el).click();
         
-        // 等待 0.5 秒让酒馆处理完后台的角色切换逻辑
         await new Promise(r => setTimeout(r, 500));
         
         $selector.remove();
-        
-        // 【最关键的一步】把解析出的 filename (如 1111.png) 传进去，而不是传名字
         applyImageToTarget(imgUrl, 'persona', $btn, selectedPersona.filename);
     });
 }
+
 
 // 3. 在酒馆原生界面注入“从图库选择”的快捷按钮 (解决点不动的问题)
 function injectMuseumHooks() {

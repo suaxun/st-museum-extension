@@ -870,7 +870,7 @@ function renderItems(items) {
     });
 }
 // ================= 核心逻辑：图片应用与快捷按钮注入 =================
-// 1. 将网络图片转换为 File 对象并推给酒馆组件 (新增 personaName 参数)
+// 1. 将网络图片转换为 File 对象并推给酒馆组件
 async function applyImageToTarget(url, targetType, $btn, personaName = null) {
     const originalHtml = $btn.html();
     $btn.html('<i class="fa-solid fa-spinner fa-spin"></i> 处理中...').css('pointer-events', 'none');
@@ -880,9 +880,17 @@ async function applyImageToTarget(url, targetType, $btn, personaName = null) {
         if (!res.ok) throw new Error("图片下载失败");
         const blob = await res.blob();
         
-        const ext = blob.type.split('/')[1] || 'png';
+        // 【核心修复2】强制更正 MIME 类型。防止图床返回 octet-stream 导致酒馆裁剪器拒绝保存
+        let mimeType = blob.type;
+        if (!mimeType || !mimeType.startsWith('image/')) {
+            const extMatch = url.match(/\.(png|jpg|jpeg|webp|gif)\b/i);
+            const ext = extMatch ? extMatch[1].toLowerCase() : 'png';
+            mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+        }
+        
+        const ext = mimeType.split('/')[1] || 'png';
         const filename = `museum_export_${Date.now()}.${ext}`;
-        const file = new File([blob], filename, { type: blob.type });
+        const file = new File([blob], filename, { type: mimeType });
         
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
@@ -894,22 +902,39 @@ async function applyImageToTarget(url, targetType, $btn, personaName = null) {
         // 替换文件
         inputElement.files = dataTransfer.files;
         
-        // 【核心修复】必须在 fetch 下载完成、即将触发 change 的前一刻填入名字！
-        // 否则在网络下载期间，ST 自身的 UI 刷新逻辑会把这个隐藏字段清空，导致裁剪后无法保存。
+        // 【核心修复3】彻底锁定 overwrite_name
+        let lockInterval = null;
         if (targetType === 'persona' && personaName) {
-            $('#avatar_upload_overwrite').val(personaName);
+            const overwriteInput = document.getElementById('avatar_upload_overwrite');
+            if (overwriteInput) {
+                overwriteInput.value = personaName;
+                
+                // 【终极死锁】防止酒馆在弹窗期间因刷新等原因暗中清空这个字段，每100毫秒强制写回！
+                lockInterval = setInterval(() => {
+                    if (overwriteInput.value !== personaName) {
+                        overwriteInput.value = personaName;
+                    }
+                }, 100);
+                
+                // 15秒后自动清理死锁（用户裁剪一般不会超过这么久）
+                setTimeout(() => {
+                    if (lockInterval) clearInterval(lockInterval);
+                }, 15000);
+            }
+            
+            // 同步更新一下酒馆UI显示的当前Persona名字，防止错位
+            $('#your_name').text(personaName);
         }
         
-        // 使用 jQuery trigger 触发，确保酒馆绑定的事件能完美监听到
-        $(inputElement).trigger('change');
+        // 使用原生事件触发，兼容性最强
+        const changeEvent = new Event('change', { bubbles: true });
+        inputElement.dispatchEvent(changeEvent);
         
-        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的裁剪窗口中确认保存");
+        toast.success(targetType === 'background' ? "已发送至背景" : "请在弹出的窗口确认裁剪！");
         $btn.html('<i class="fa-solid fa-check"></i> 成功');
 
-        if (targetType === 'persona') {
-            // 如果是换Persona头像，自动把扩展菜单收起来，方便看裁剪窗口
-            $('#extensions-settings-button .drawer-toggle').click(); 
-        }
+        // 注意：这里不再自动收起扩展面板了，防止收起面板触发酒馆重绘导致状态丢失
+
     } catch (e) {
         console.error(e);
         toast.error("应用图片失败: " + e.message);
@@ -967,24 +992,27 @@ function showPersonaSelector(imgUrl, $btn) {
         $selector.remove();
     });
     
-    $selector.find('.museum-persona-item').on('click', function(e) {
+    $selector.find('.museum-persona-item').on('click', async function(e) {
         e.stopPropagation();
         const selectedIdx = $(this).data('idx');
         const selectedPersona = personas[selectedIdx];
         
         $(this).css('opacity', '0.5');
+        $selector.find('.museum-persona-header span').text('正在拉取状态...');
         
         // 点击选中这个 Persona (触发ST内部选中状态)
         $(selectedPersona.el).click();
         
+        // 【核心修复1】必须等待酒馆内部状态完全切换完毕 (给酒馆500毫秒时间刷新UI)
+        await new Promise(r => setTimeout(r, 500));
+        
         // 移除选择器面板
         $selector.remove();
         
-        // 【核心修复】将选中的 persona 名字传递给 applyImageToTarget 函数
+        // 开始下载图片并应用
         applyImageToTarget(imgUrl, 'persona', $btn, selectedPersona.name);
     });
 }
-
 
 // 3. 在酒馆原生界面注入“从图库选择”的快捷按钮 (解决点不动的问题)
 function injectMuseumHooks() {

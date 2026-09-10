@@ -1596,20 +1596,45 @@ function initializePlugin() {
 
     $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
     $('#museum-auto-capture-theme').on('click', handleAutoCaptureTheme);
-
     $('#museum-save-btn').on('click', async () => {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
-        extSettings.sbUrl = $('#museum-sb-url').val().trim();
-        extSettings.sbKey = $('#museum-sb-key').val().trim();
-        extSettings.sbEmail = $('#museum-email').val().trim();
-        extSettings.sbPass = $('#museum-pass').val().trim();
-        extSettings.albumFilter = $('#museum-album-filter').val().trim();
+        
+        // 1. 暴力清洗：使用 replace(/\s+/g, '') 剔除哪怕是混在中间的任何空格和换行
+        extSettings.sbUrl = $('#museum-sb-url').val().replace(/\s+/g, '');
+        extSettings.sbKey = $('#museum-sb-key').val().replace(/\s+/g, '');
+        extSettings.sbEmail = $('#museum-email').val().replace(/\s+/g, '');
+        extSettings.sbPass = $('#museum-pass').val().trim(); // 密码只去首尾空格，因为有人密码里确实有空格
+        
+        // 把清洗后的干净数据写回输入框，让你自己也能看到
+        $('#museum-sb-url').val(extSettings.sbUrl);
+        $('#museum-sb-key').val(extSettings.sbKey);
+        $('#museum-email').val(extSettings.sbEmail);
+        
         saveExtensionSettings();
         
+        // 2. 强制清除浏览器的旧登录缓存，打断“PC端假登录”现象
+        if (window.supabase) {
+            try { await window.supabase.auth.signOut(); } catch(e) {}
+        }
+        window.supabase = null;
+        supabase = null;
+        session = null;
+        
+        // 3. 重新初始化并进行纯净登录
+        const $btn = $(this);
+        const originalText = $btn.text();
+        $btn.text('正在验证...').css('pointer-events', 'none');
+        
         const success = await initSupabaseClient();
+        
+        $btn.text(originalText).css('pointer-events', 'auto');
+        
         if (success) {
             $('#museum-auth-panel').slideUp();
+            toast.success("重新验证并登录成功！");
             refreshGallery();
+        } else {
+            toast.error("账号或密码验证失败，请重新检查！");
         }
     });
 
@@ -1696,5 +1721,4 @@ injectMuseumHooks();
 
     waitForSillyTavernContext();
 })();
-
 

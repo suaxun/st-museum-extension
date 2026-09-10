@@ -3,8 +3,10 @@ const EXTENSION_NAME = "museum_importer";
 const EXTENSION_ID = "museum-extension-root"; // 唯一的 DOM ID
 
 // 全局变量
+// 全局变量
 let supabase = null;
 let session = null;
+let supabaseB = null; // 【新增】备用库客户端
 let currentFilter = 'role_card'; // 默认直接显示“角色”
 let keepAliveTimer = null; 
 // 【新增：用于搜索和标签过滤的变量】
@@ -412,10 +414,27 @@ async function initSupabaseClient() {
     try {
         const createClient = window.supabase.createClient || window.supabase.default.createClient;
         supabase = createClient(settings.sbUrl, settings.sbKey);
+        
+        // 初始化备用库
+        if (settings.sbUrlB && settings.sbKeyB) {
+            supabaseB = createClient(settings.sbUrlB, settings.sbKeyB);
+        } else {
+            supabaseB = null;
+        }
+
         const { data } = await supabase.auth.getSession();
         if (data.session) {
             session = data.session;
-            startKeepAlive(); // 【新增】连接成功，启动保活
+            
+            // 尝试静默登录备用库
+            if (supabaseB && settings.sbEmail && settings.sbPass) {
+                await supabaseB.auth.signInWithPassword({
+                    email: settings.sbEmail.replace(/[\s\r\n]+/g, ''),
+                    password: settings.sbPass
+                }).catch(() => { supabaseB = null; });
+            }
+
+            startKeepAlive();
             return true;
         } else if (settings.sbEmail && settings.sbPass) {
             return await doLogin();
@@ -432,43 +451,29 @@ async function doLogin() {
     if (!supabase) return false;
     const settings = getExtensionSettings()[EXTENSION_NAME];
     
-    // 清理邮箱的空格，但【坚决不改动密码】，保留最原始的输入
     const cleanEmail = (settings.sbEmail || '').replace(/[\s\r\n]+/g, '');
     const rawPass = settings.sbPass || ''; 
-    const currentUrl = settings.sbUrl || '空';
 
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
             email: cleanEmail,
             password: rawPass
         });
+        if (error) throw error;
+        session = data.session;
         
-        if (error) {
-            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            if (isMobile) {
-                // 提取密码第一个和最后一个字母
-                const firstChar = rawPass.charAt(0) || '空';
-                const lastChar = rawPass.charAt(rawPass.length - 1) || '空';
-                
-                alert(`【登录被服务器拒绝】
-目标库: [${currentUrl}]
-邮箱: [${cleanEmail}]
-密码首尾字符: [${firstChar}] 和 [${lastChar}] (密码长度: ${rawPass.length})
-
-服务器原生报错: ${error.message}
-
-👉 排查建议：
-1. 如果报错是 "Invalid login credentials"，说明此邮箱/密码不属于当前填写的 URL 对应的库！请检查是否把备用库的密码填到了主库里，或者主库的 URL 填成了备用库。
-2. 如果报错是 "Email not confirmed"，请去 Supabase 后台关闭邮箱验证功能。`);
-            }
-            throw error;
+        // 同步登录备用库
+        if (supabaseB) {
+            try {
+                const { error: errorB } = await supabaseB.auth.signInWithPassword({
+                    email: cleanEmail, password: rawPass
+                });
+                if (errorB) supabaseB = null;
+            } catch(e) { supabaseB = null; }
         }
         
-        session = data.session;
-        toast.success("博物馆登录成功");
-        
+        toast.success("博物馆登录成功" + (supabaseB ? " (已开启双库模式)" : ""));
         startKeepAlive();
-        
         return true;
     } catch (e) {
         toast.error("登录失败: " + e.message);
@@ -477,18 +482,20 @@ async function doLogin() {
 }
 
 
-
 // === 新增：加载相册列表并渲染 ===
 async function loadAlbumList() {
     if (!supabase) return;
     try {
-        const { data, error } = await supabase.from('fragments').select('album_name').eq('type', 'image');
-        if (error) throw error;
+        // 双库并发查询相册名
+        const p1 = supabase.from('fragments').select('album_name').eq('type', 'image');
+        const p2 = supabaseB ? supabaseB.from('fragments').select('album_name').eq('type', 'image') : Promise.resolve({data: []});
+        
+        const [res1, res2] = await Promise.all([p1, p2]);
         
         const albums = new Set();
-        data.forEach(item => {
-            if (item.album_name) albums.add(item.album_name);
-        });
+        if (res1.data) res1.data.forEach(item => { if (item.album_name) albums.add(item.album_name); });
+        if (res2.data) res2.data.forEach(item => { if (item.album_name) albums.add(item.album_name); });
+
         
         const albumContainer = $('#museum-album-list');
         albumContainer.empty();
@@ -548,31 +555,43 @@ async function refreshGallery() {
         const extSettings = getExtensionSettings()[EXTENSION_NAME] || {};
         const limitVal = extSettings.itemLimit || '150'; // 默认 150
 
-        // 基础查询
-        let query = supabase.from("fragments").select("*").order("created_at", { ascending: false });
-        
-        // 如果不是选了“全部”，就加上数量限制
-        if (limitVal !== 'all') {
-            query = query.limit(parseInt(limitVal, 10));
-        }
-        
-        // 直接根据当前的过滤条件查询
-        query = query.eq('type', currentFilter);
-
-
-        // --- 新增：如果是图片类型，检查有没有选中特定的相册 ---
-        if (currentFilter === 'image') {
-            const selectedAlbums = extSettings.selectedAlbums || [];
-            if (selectedAlbums.length > 0) {
-                // Supabase in 查询
-                query = query.in('album_name', selectedAlbums);
-            } else {
-                // 如果没选，屏蔽以 '.' 开头的隐藏相册 (兼容你的原版逻辑)
-                query = query.or('album_name.is.null,album_name.not.like..%');
+        // 构造独立的查询生成器
+        const buildQuery = (client) => {
+            let query = client.from("fragments").select("*").order("created_at", { ascending: false });
+            // 并发模式下先各自按上限取，合并后再切断，保证不漏最新数据
+            if (limitVal !== 'all') query = query.limit(parseInt(limitVal, 10));
+            
+            query = query.eq('type', currentFilter);
+            if (currentFilter === 'image') {
+                const selectedAlbums = extSettings.selectedAlbums || [];
+                if (selectedAlbums.length > 0) {
+                    query = query.in('album_name', selectedAlbums);
+                } else {
+                    query = query.or('album_name.is.null,album_name.not.like..%');
+                }
             }
+            return query;
+        };
+
+        const pMain = buildQuery(supabase);
+        const pBackup = supabaseB ? buildQuery(supabaseB) : Promise.resolve({ data: [] });
+
+        const [resMain, resBackup] = await Promise.all([pMain, pBackup]);
+        if (resMain.error) throw resMain.error;
+
+        // 合并主库和备用库的数据
+        let combinedData = [...(resMain.data || []), ...(resBackup.data || [])];
+        
+        // 按照时间降序重新大排序 (穿插显示)
+        combinedData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        // 裁切最终结果满足用户的加载数量要求
+        if (limitVal !== 'all') {
+            combinedData = combinedData.slice(0, parseInt(limitVal, 10));
         }
-        const { data, error } = await query;
-        if (error) throw error;
+        
+        const data = combinedData;
+
 
         allFetchedItems = (data || []).map(item => {
             item._parsed = {};
@@ -1539,15 +1558,21 @@ function createSettingsHtml() {
                 <div class="menu_button fa-solid fa-arrows-rotate" id="museum-refresh-btn" title="刷新"></div>
                 <div class="menu_button fa-solid fa-gear" id="museum-config-toggle" title="设置"></div>
             </div>
-
             <div id="museum-auth-panel" class="museum-auth-box" style="display:none;">
-                <small>Supabase 连接配置</small>
-                <input type="text" id="museum-sb-url" class="text_pole textarea_compact" placeholder="Supabase URL" value="${settings.sbUrl || ''}">
-                <input type="password" id="museum-sb-key" class="text_pole textarea_compact" placeholder="Supabase Key" value="${settings.sbKey || ''}">
-                <input type="text" id="museum-email" class="text_pole textarea_compact" placeholder="Email" value="${settings.sbEmail || ''}">
+                <small style="color:var(--SmartThemeQuoteColor);">主库配置 (必填)</small>
+                <input type="text" id="museum-sb-url" class="text_pole textarea_compact" placeholder="主库 URL" value="${settings.sbUrl || ''}">
+                <input type="password" id="museum-sb-key" class="text_pole textarea_compact" placeholder="主库 Key" value="${settings.sbKey || ''}">
+                
+                <small style="color:#4caf50; margin-top:5px; display:block;">备用库配置 (选填，双库融合)</small>
+                <input type="text" id="museum-sb-url-b" class="text_pole textarea_compact" placeholder="备用库 URL" value="${settings.sbUrlB || ''}">
+                <input type="password" id="museum-sb-key-b" class="text_pole textarea_compact" placeholder="备用库 Key" value="${settings.sbKeyB || ''}">
+
+                <small style="margin-top:5px; display:block;">统一账号密码</small>
+                <input type="text" id="museum-email" class="text_pole textarea_compact" placeholder="Email (主备同账号)" value="${settings.sbEmail || ''}">
                 <input type="password" id="museum-pass" class="text_pole textarea_compact" placeholder="Password" value="${settings.sbPass || ''}">
                 <button id="museum-save-btn" class="menu_button" style="width:100%; margin-top:5px;">保存并登录</button>
             </div>
+
 
             <div class="museum-filter-bar">
                 <div class="museum-filter-btn active" data-filter="role_card">角色</div>
@@ -1629,18 +1654,27 @@ function initializePlugin() {
     $('#museum-save-btn').on('click', async () => {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
         
-        // 1. 暴力清洗：使用 replace(/\s+/g, '') 剔除哪怕是混在中间的任何空格和换行
-        extSettings.sbUrl = $('#museum-sb-url').val().replace(/\s+/g, '');
-        extSettings.sbKey = $('#museum-sb-key').val().replace(/\s+/g, '');
-        extSettings.sbEmail = $('#museum-email').val().replace(/\s+/g, '');
-        extSettings.sbPass = $('#museum-pass').val();  // 密码只去首尾空格，因为有人密码里确实有空格
+        // 1. 暴力清洗：主库和备用库
+        let rawUrl = $('#museum-sb-url').val().replace(/[\s\r\n]+/g, '');
+        extSettings.sbUrl = rawUrl.replace(/\/+$/, '');
+        extSettings.sbKey = $('#museum-sb-key').val().replace(/[\s\r\n]+/g, '');
         
-        // 把清洗后的干净数据写回输入框，让你自己也能看到
+        let rawUrlB = $('#museum-sb-url-b').val().replace(/[\s\r\n]+/g, '');
+        extSettings.sbUrlB = rawUrlB.replace(/\/+$/, '');
+        extSettings.sbKeyB = $('#museum-sb-key-b').val().replace(/[\s\r\n]+/g, '');
+
+        extSettings.sbEmail = $('#museum-email').val().replace(/[\s\r\n]+/g, '');
+        extSettings.sbPass = $('#museum-pass').val(); 
+        
+        // 写回输入框
         $('#museum-sb-url').val(extSettings.sbUrl);
         $('#museum-sb-key').val(extSettings.sbKey);
+        $('#museum-sb-url-b').val(extSettings.sbUrlB);
+        $('#museum-sb-key-b').val(extSettings.sbKeyB);
         $('#museum-email').val(extSettings.sbEmail);
         
         saveExtensionSettings();
+
         
         // 2. 强制清除浏览器的旧登录缓存，打断“PC端假登录”现象
         if (window.supabase) {

@@ -431,16 +431,30 @@ async function initSupabaseClient() {
 async function doLogin() {
     if (!supabase) return false;
     const settings = getExtensionSettings()[EXTENSION_NAME];
+    
+    // 在发送前做最后一次极限清洗，防止读取时出错
+    const cleanEmail = (settings.sbEmail || '').replace(/\s+/g, '');
+    const cleanPass = (settings.sbPass || '').trim();
+
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
-            email: settings.sbEmail,
-            password: settings.sbPass
+            email: cleanEmail,
+            password: cleanPass
         });
-        if (error) throw error;
+        
+        if (error) {
+            // 如果是在手机端报错，强制弹窗显示它到底发了什么
+            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            if (isMobile) {
+                alert(`【手机端终极排查】\n登录被拒绝！\n它发送的邮箱是: [${cleanEmail}]\n密码长度是: ${cleanPass.length}\n报错原因: ${error.message}\n\n*如果邮箱不对或密码长度不对，说明你的手机卡了旧缓存，请立刻刷新手机网页！`);
+            }
+            throw error;
+        }
+        
         session = data.session;
         toast.success("博物馆登录成功");
         
-        startKeepAlive(); // 【新增】登录成功，启动保活
+        startKeepAlive();
         
         return true;
     } catch (e) {
@@ -448,6 +462,7 @@ async function doLogin() {
         return false;
     }
 }
+
 // === 新增：加载相册列表并渲染 ===
 async function loadAlbumList() {
     if (!supabase) return;

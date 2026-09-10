@@ -432,34 +432,34 @@ async function doLogin() {
     if (!supabase) return false;
     const settings = getExtensionSettings()[EXTENSION_NAME];
     
-    const cleanEmail = (settings.sbEmail || '').replace(/\s+/g, '');
-    const cleanPass = (settings.sbPass || '').trim();
+    // 清理邮箱的空格，但【坚决不改动密码】，保留最原始的输入
+    const cleanEmail = (settings.sbEmail || '').replace(/[\s\r\n]+/g, '');
+    const rawPass = settings.sbPass || ''; 
     const currentUrl = settings.sbUrl || '空';
 
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
             email: cleanEmail,
-            password: cleanPass
+            password: rawPass
         });
         
         if (error) {
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
             if (isMobile) {
-                // 提取密码第一个和最后一个字母看看有没有被大写篡改
-                const firstChar = cleanPass.charAt(0);
-                const lastChar = cleanPass.charAt(cleanPass.length - 1);
+                // 提取密码第一个和最后一个字母
+                const firstChar = rawPass.charAt(0) || '空';
+                const lastChar = rawPass.charAt(rawPass.length - 1) || '空';
                 
-                alert(`【真相大白弹窗】
-连向的网址: 
-${currentUrl}
+                alert(`【登录被服务器拒绝】
+目标库: [${currentUrl}]
+邮箱: [${cleanEmail}]
+密码首尾字符: [${firstChar}] 和 [${lastChar}] (密码长度: ${rawPass.length})
 
-验证的邮箱: ${cleanEmail}
-密码首尾字母: [${firstChar}] 和 [${lastChar}]
-报错: ${error.message}
+服务器原生报错: ${error.message}
 
-👉 请核对两件事：
-1. 网址是不是真的是你的主力库网址？
-2. 密码第一个字母是不是被手机键盘偷偷大写了？`);
+👉 排查建议：
+1. 如果报错是 "Invalid login credentials"，说明此邮箱/密码不属于当前填写的 URL 对应的库！请检查是否把备用库的密码填到了主库里，或者主库的 URL 填成了备用库。
+2. 如果报错是 "Email not confirmed"，请去 Supabase 后台关闭邮箱验证功能。`);
             }
             throw error;
         }
@@ -475,6 +475,7 @@ ${currentUrl}
         return false;
     }
 }
+
 
 
 // === 新增：加载相册列表并渲染 ===
@@ -1632,7 +1633,7 @@ function initializePlugin() {
         extSettings.sbUrl = $('#museum-sb-url').val().replace(/\s+/g, '');
         extSettings.sbKey = $('#museum-sb-key').val().replace(/\s+/g, '');
         extSettings.sbEmail = $('#museum-email').val().replace(/\s+/g, '');
-        extSettings.sbPass = $('#museum-pass').val().trim(); // 密码只去首尾空格，因为有人密码里确实有空格
+        extSettings.sbPass = $('#museum-pass').val();  // 密码只去首尾空格，因为有人密码里确实有空格
         
         // 把清洗后的干净数据写回输入框，让你自己也能看到
         $('#museum-sb-url').val(extSettings.sbUrl);

@@ -432,9 +432,9 @@ async function doLogin() {
     if (!supabase) return false;
     const settings = getExtensionSettings()[EXTENSION_NAME];
     
-    // 在发送前做最后一次极限清洗，防止读取时出错
     const cleanEmail = (settings.sbEmail || '').replace(/\s+/g, '');
     const cleanPass = (settings.sbPass || '').trim();
+    const currentUrl = settings.sbUrl || '空';
 
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -443,10 +443,23 @@ async function doLogin() {
         });
         
         if (error) {
-            // 如果是在手机端报错，强制弹窗显示它到底发了什么
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
             if (isMobile) {
-                alert(`【手机端终极排查】\n登录被拒绝！\n它发送的邮箱是: [${cleanEmail}]\n密码长度是: ${cleanPass.length}\n报错原因: ${error.message}\n\n*如果邮箱不对或密码长度不对，说明你的手机卡了旧缓存，请立刻刷新手机网页！`);
+                // 提取密码第一个和最后一个字母看看有没有被大写篡改
+                const firstChar = cleanPass.charAt(0);
+                const lastChar = cleanPass.charAt(cleanPass.length - 1);
+                
+                alert(`【真相大白弹窗】
+连向的网址: 
+${currentUrl}
+
+验证的邮箱: ${cleanEmail}
+密码首尾字母: [${firstChar}] 和 [${lastChar}]
+报错: ${error.message}
+
+👉 请核对两件事：
+1. 网址是不是真的是你的主力库网址？
+2. 密码第一个字母是不是被手机键盘偷偷大写了？`);
             }
             throw error;
         }
@@ -462,6 +475,7 @@ async function doLogin() {
         return false;
     }
 }
+
 
 // === 新增：加载相册列表并渲染 ===
 async function loadAlbumList() {

@@ -1797,7 +1797,6 @@ function initializePlugin() {
     });
 
     let hasLoadedGallery = false;
-    let hasLoadedGallery = false;
     $(`#${EXTENSION_ID} .inline-drawer-toggle`).on('click', function() {
         if (!hasLoadedGallery) {
             hasLoadedGallery = true;
@@ -1815,7 +1814,7 @@ function initializePlugin() {
         }
     });
 
-injectMuseumHooks();
+    injectMuseumHooks();
     console.log("[Museum] 初始化完成");
 }
 
@@ -1834,4 +1833,5 @@ injectMuseumHooks();
 
     waitForSillyTavernContext();
 })();
+
 

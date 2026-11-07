@@ -482,53 +482,65 @@ async function doLogin() {
 }
 
 
-// === 新增：加载相册列表并渲染 ===
-async function loadAlbumList() {
-    if (!supabase) return;
+// === 【新增】从 R2 拉取应急目录 JSON 的工具函数 ===
+async function fetchR2EmergencyItems() {
+    const extSettings = getExtensionSettings()[EXTENSION_NAME] || {};
+    const r2Pub = (extSettings.r2PublicUrl || '').replace(/\/+$/, '');
+    if (!r2Pub) return [];
     try {
-        // 双库并发查询相册名
-        const p1 = supabase.from('fragments').select('album_name').eq('type', 'image');
-        const p2 = supabaseB ? supabaseB.from('fragments').select('album_name').eq('type', 'image') : Promise.resolve({data: []});
-        
-        const [res1, res2] = await Promise.all([p1, p2]);
-        
+        // 加上时间戳防浏览器缓存，确保每次刷新都读到网页刚存的最新内容
+        const res = await fetch(`${r2Pub}/museum_emergency_backup.json?t=${Date.now()}`);
+        if (!res.ok) return [];
+        const list = await res.json();
+        return Array.isArray(list) ? list : [];
+    } catch (e) {
+        console.warn("[Museum] 读取 R2 应急目录失败或尚无文件:", e.message);
+        return [];
+    }
+}
+
+// === 修改：加载相册列表（兼容主库、备用库、R2 应急库） ===
+async function loadAlbumList() {
+    try {
+        const p1 = (supabase && session) ? supabase.from('fragments').select('album_name').eq('type', 'image') : Promise.resolve({ data: [] });
+        const p2 = (supabaseB) ? supabaseB.from('fragments').select('album_name').eq('type', 'image') : Promise.resolve({ data: [] });
+        const p3 = fetchR2EmergencyItems();
+
+        const [res1, res2, r2Items] = await Promise.all([p1, p2, p3]);
+
         const albums = new Set();
         if (res1.data) res1.data.forEach(item => { if (item.album_name) albums.add(item.album_name); });
         if (res2.data) res2.data.forEach(item => { if (item.album_name) albums.add(item.album_name); });
+        if (r2Items) r2Items.forEach(item => { if (item.type === 'image' && item.album_name) albums.add(item.album_name); });
 
-        
         const albumContainer = $('#museum-album-list');
         albumContainer.empty();
-        
+
         const extSettings = getExtensionSettings()[EXTENSION_NAME] || {};
         let selectedAlbums = extSettings.selectedAlbums || [];
         if (!Array.isArray(selectedAlbums)) selectedAlbums = [];
-        
+
         if (albums.size === 0) {
             albumContainer.html('<span style="font-size:0.8em; color:gray;">暂无相册</span>');
             return;
         }
-        
+
         albums.forEach(album => {
-            // 过滤隐藏相册前缀
             const displayName = album.startsWith('.') ? album.substring(1) : album;
             const isSelected = selectedAlbums.includes(album);
             const btn = $(`<div class="museum-tag ${isSelected ? 'active' : ''}" data-album="${album}">${displayName}</div>`);
-            
+
             btn.on('click', function() {
                 $(this).toggleClass('active');
                 const activeAlbums = [];
                 $('#museum-album-list .museum-tag.active').each(function() {
                     activeAlbums.push($(this).data('album'));
                 });
-                // 保存设置
                 extSettings.selectedAlbums = activeAlbums;
                 saveExtensionSettings();
-                
-                // 如果当前在图片页，立刻刷新画廊
                 if (currentFilter === 'image') refreshGallery();
             });
-            
+
             albumContainer.append(btn);
         });
     } catch (e) {
@@ -536,31 +548,36 @@ async function loadAlbumList() {
     }
 }
 
-// --- 数据获取与渲染 ---
+// --- 数据获取与渲染 (支持 Supabase 挂掉时单独读取 R2 应急数据！) ---
 async function refreshGallery() {
     const grid = $('#museum-grid');
     grid.empty();
-    $('#museum-tag-container').empty(); // 清空标签
+    $('#museum-tag-container').empty();
     grid.append('<div class="museum-spinner"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</div>');
 
-    const success = await initSupabaseClient();
-    
-    if (!success || !session) {
-        grid.html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">未连接。<br>请点击上方齿轮图标配置并登录。</div>');
+    const extSettings = getExtensionSettings()[EXTENSION_NAME] || {};
+    const hasR2Emergency = !!(extSettings.r2PublicUrl && extSettings.r2PublicUrl.trim());
+    const hasSbConfig = !!(extSettings.sbUrl && extSettings.sbKey);
+
+    let sbConnected = false;
+    if (hasSbConfig) {
+        sbConnected = await initSupabaseClient();
+    }
+
+    // 如果连 Supabase 没连上，同时也没填 R2 公共域名，才提示未连接
+    if ((!sbConnected || !session) && !hasR2Emergency) {
+        grid.html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">未连接。<br>请点击上方齿轮图标配置 Supabase 或填入 R2 公共域名开启应急读取。</div>');
         return;
     }
 
     try {
-        // 【新增：获取用户设置的加载数量】
-        const extSettings = getExtensionSettings()[EXTENSION_NAME] || {};
-        const limitVal = extSettings.itemLimit || '150'; // 默认 150
+        const limitVal = extSettings.itemLimit || '150';
 
-        // 构造独立的查询生成器
+        // 构造 Supabase 查询生成器
         const buildQuery = (client) => {
+            if (!client) return Promise.resolve({ data: [] });
             let query = client.from("fragments").select("*").order("created_at", { ascending: false });
-            // 并发模式下先各自按上限取，合并后再切断，保证不漏最新数据
             if (limitVal !== 'all') query = query.limit(parseInt(limitVal, 10));
-            
             query = query.eq('type', currentFilter);
             if (currentFilter === 'image') {
                 const selectedAlbums = extSettings.selectedAlbums || [];
@@ -570,30 +587,48 @@ async function refreshGallery() {
                     query = query.or('album_name.is.null,album_name.not.like..%');
                 }
             }
-            return query;
+            return query.then(res => res).catch(() => ({ data: [] }));
         };
 
-        const pMain = buildQuery(supabase);
-        const pBackup = supabaseB ? buildQuery(supabaseB) : Promise.resolve({ data: [] });
+        // 1. 并发拉取：主库 + 备用库 + R2 应急库
+        const pMain = (sbConnected && session) ? buildQuery(supabase) : Promise.resolve({ data: [] });
+        const pBackup = (sbConnected && supabaseB) ? buildQuery(supabaseB) : Promise.resolve({ data: [] });
+        const pR2 = hasR2Emergency ? fetchR2EmergencyItems() : Promise.resolve([]);
 
-        const [resMain, resBackup] = await Promise.all([pMain, pBackup]);
-        if (resMain.error) throw resMain.error;
+        const [resMain, resBackup, rawR2Items] = await Promise.all([pMain, pBackup, pR2]);
 
-        // 合并主库和备用库的数据
-        let combinedData = [...(resMain.data || []), ...(resBackup.data || [])];
-        
-        // 按照时间降序重新大排序 (穿插显示)
-        combinedData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        // 2. 过滤 R2 应急数据以匹配当前的分类 (role_card / beautify / image) 和相册
+        const filteredR2Items = (rawR2Items || []).filter(item => {
+            if (item.type !== currentFilter) return false;
+            if (currentFilter === 'image') {
+                const selectedAlbums = extSettings.selectedAlbums || [];
+                if (selectedAlbums.length > 0) {
+                    return selectedAlbums.includes(item.album_name);
+                } else {
+                    return !item.album_name || !item.album_name.startsWith('.');
+                }
+            }
+            return true;
+        });
 
-        // 裁切最终结果满足用户的加载数量要求
+        // 3. 合并三方数据并根据 file_url + content 去重
+        let combinedData = [...filteredR2Items, ...(resMain.data || []), ...(resBackup.data || [])];
+        const seen = new Set();
+        combinedData = combinedData.filter(item => {
+            const key = `${item.type}_${item.file_url || ''}_${item.content || ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        // 按照时间降序排序
+        combinedData.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
         if (limitVal !== 'all') {
             combinedData = combinedData.slice(0, parseInt(limitVal, 10));
         }
-        
-        const data = combinedData;
 
-
-        allFetchedItems = (data || []).map(item => {
+        allFetchedItems = combinedData.map(item => {
             item._parsed = {};
             try {
                 if (item.content && item.content.startsWith('{')) {
@@ -602,13 +637,12 @@ async function refreshGallery() {
                     item._parsed.name = item.content;
                 }
             } catch(e){}
-            
+
             let tags = [];
             if (item.category) {
                 tags = item.category.replace(/，/g, ",").split(/[, \s]+/).filter(t => t && t.trim().length > 0);
             }
             item._parsed.tags = tags;
-            
             return item;
         });
 
@@ -621,6 +655,7 @@ async function refreshGallery() {
         grid.html('<div style="text-align:center; padding:20px;">加载失败</div>');
     }
 }
+
 
 // ====== 请把下面这段代码插入到 refreshGallery() 和 renderItems() 之间 ======
 
@@ -1566,7 +1601,12 @@ function createSettingsHtml() {
                 <small style="color:#4caf50; margin-top:5px; display:block;">备用库配置 (选填，双库融合)</small>
                 <input type="text" id="museum-sb-url-b" class="text_pole textarea_compact" placeholder="备用库 URL" value="${settings.sbUrlB || ''}">
                 <input type="password" id="museum-sb-key-b" class="text_pole textarea_compact" placeholder="备用库 Key" value="${settings.sbKeyB || ''}">
+                <!-- 👇 【新增】R2 应急读取与上传配置 👇 -->
+                <small style="color:#ff9800; margin-top:5px; display:block;">⚡ R2 应急模式配置 (Supabase 被封时必填)</small>
+                <input type="text" id="museum-r2-public" class="text_pole textarea_compact" placeholder="R2 公共域名 (如 https://img.xx.com)" value="${settings.r2PublicUrl || ''}">
+                <input type="text" id="museum-r2-worker" class="text_pole textarea_compact" placeholder="R2 Worker URL (仅酒馆内抓取上传主题时需要)" value="${settings.r2WorkerUrl || ''}">
 
+            
                 <small style="margin-top:5px; display:block;">统一账号密码</small>
                 <input type="text" id="museum-email" class="text_pole textarea_compact" placeholder="Email (主备同账号)" value="${settings.sbEmail || ''}">
                 <input type="password" id="museum-pass" class="text_pole textarea_compact" placeholder="Password" value="${settings.sbPass || ''}">
@@ -1651,56 +1691,66 @@ function initializePlugin() {
 
     $('#museum-config-toggle').on('click', () => $('#museum-auth-panel').slideToggle());
     $('#museum-auto-capture-theme').on('click', handleAutoCaptureTheme);
-    $('#museum-save-btn').on('click', async () => {
+    $('#museum-save-btn').on('click', async function() {
         const extSettings = getExtensionSettings()[EXTENSION_NAME];
         
-        // 1. 暴力清洗：主库和备用库
-        let rawUrl = $('#museum-sb-url').val().replace(/[\s\r\n]+/g, '');
+        // 1. 清洗主库、备用库、以及新增的 R2 应急配置
+        let rawUrl = ($('#museum-sb-url').val() || '').replace(/[\s\r\n]+/g, '');
         extSettings.sbUrl = rawUrl.replace(/\/+$/, '');
-        extSettings.sbKey = $('#museum-sb-key').val().replace(/[\s\r\n]+/g, '');
+        extSettings.sbKey = ($('#museum-sb-key').val() || '').replace(/[\s\r\n]+/g, '');
         
-        let rawUrlB = $('#museum-sb-url-b').val().replace(/[\s\r\n]+/g, '');
+        let rawUrlB = ($('#museum-sb-url-b').val() || '').replace(/[\s\r\n]+/g, '');
         extSettings.sbUrlB = rawUrlB.replace(/\/+$/, '');
-        extSettings.sbKeyB = $('#museum-sb-key-b').val().replace(/[\s\r\n]+/g, '');
+        extSettings.sbKeyB = ($('#museum-sb-key-b').val() || '').replace(/[\s\r\n]+/g, '');
 
-        extSettings.sbEmail = $('#museum-email').val().replace(/[\s\r\n]+/g, '');
-        extSettings.sbPass = $('#museum-pass').val(); 
+        // 👇 【新增】保存 R2 公共域名和 Worker URL
+        extSettings.r2PublicUrl = ($('#museum-r2-public').val() || '').replace(/[\s\r\n]+/g, '').replace(/\/+$/, '');
+        extSettings.r2WorkerUrl = ($('#museum-r2-worker').val() || '').replace(/[\s\r\n]+/g, '').replace(/\/+$/, '');
+
+        extSettings.sbEmail = ($('#museum-email').val() || '').replace(/[\s\r\n]+/g, '');
+        extSettings.sbPass = $('#museum-pass').val() || ''; 
         
         // 写回输入框
         $('#museum-sb-url').val(extSettings.sbUrl);
         $('#museum-sb-key').val(extSettings.sbKey);
         $('#museum-sb-url-b').val(extSettings.sbUrlB);
         $('#museum-sb-key-b').val(extSettings.sbKeyB);
+        $('#museum-r2-public').val(extSettings.r2PublicUrl);
+        $('#museum-r2-worker').val(extSettings.r2WorkerUrl);
         $('#museum-email').val(extSettings.sbEmail);
         
         saveExtensionSettings();
 
-        
-        // 2. 强制清除浏览器的旧登录缓存，打断“PC端假登录”现象
-        if (window.supabase) {
-            try { await window.supabase.auth.signOut(); } catch(e) {}
+        if (window.supabase && supabase && supabase.auth) {
+            try { await supabase.auth.signOut(); } catch(e) {}
         }
-        window.supabase = null;
         supabase = null;
         session = null;
         
-        // 3. 重新初始化并进行纯净登录
         const $btn = $(this);
         const originalText = $btn.text();
-        $btn.text('正在验证...').css('pointer-events', 'none');
+        $btn.text('正在连接...').css('pointer-events', 'none');
         
-        const success = await initSupabaseClient();
+        const success = extSettings.sbUrl ? await initSupabaseClient() : false;
         
         $btn.text(originalText).css('pointer-events', 'auto');
         
         if (success) {
             $('#museum-auth-panel').slideUp();
-            toast.success("重新验证并登录成功！");
+            toast.success("Supabase 验证并登录成功！");
+            loadAlbumList();
+            refreshGallery();
+        } else if (extSettings.r2PublicUrl) {
+            // 👇 如果 Supabase 被封登录失败，但填了 R2 域名，直接开启 R2 应急模式！
+            $('#museum-auth-panel').slideUp();
+            toast.info("⚡ 已启用 R2 应急模式读取云端数据！");
+            loadAlbumList();
             refreshGallery();
         } else {
-            toast.error("账号或密码验证失败，请重新检查！");
+            toast.error("连接失败：请检查 Supabase 账号或填入 R2 公共域名！");
         }
     });
+
 
     $('#museum-refresh-btn').on('click', refreshGallery);
     
@@ -1747,25 +1797,24 @@ function initializePlugin() {
     });
 
     let hasLoadedGallery = false;
+    let hasLoadedGallery = false;
     $(`#${EXTENSION_ID} .inline-drawer-toggle`).on('click', function() {
         if (!hasLoadedGallery) {
             hasLoadedGallery = true;
-            
-            loadSupabase().then(() => {
-                const s = getExtensionSettings()[EXTENSION_NAME];
-                if (s && s.sbUrl && s.sbKey) {
-                    initSupabaseClient().then(() => {
-    if (session) {
-        loadAlbumList(); // <- 加上这行
-        refreshGallery();
-    }
-});
-                } else {
-                    $('#museum-grid').html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">未配置数据库。<br>请点击上方齿轮图标配置。</div>');
-                }
-            });
+            const s = getExtensionSettings()[EXTENSION_NAME] || {};
+            if ((s.sbUrl && s.sbKey) || s.r2PublicUrl) {
+                loadSupabase().then(() => {
+                    initSupabaseClient().finally(() => {
+                        loadAlbumList();
+                        refreshGallery();
+                    });
+                });
+            } else {
+                $('#museum-grid').html('<div style="text-align:center; padding:20px; font-size:0.8em; opacity:0.7;">未配置数据库。<br>请点击上方齿轮图标配置 Supabase 或 R2 公共域名。</div>');
+            }
         }
     });
+
 injectMuseumHooks();
     console.log("[Museum] 初始化完成");
 }
